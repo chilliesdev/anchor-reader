@@ -2,6 +2,8 @@
 
 A native Android reader based on the supplied original design. Kotlin and Jetpack Compose implement the screens. Books, progress, source files, preferences and saved practice stay on the device. Optional question generation sends selected section text to OpenAI through the user's ChatGPT connection.
 
+[Open Design HTML reference and preview instructions](design/open-design/README.md).
+
 ## Read and practise
 
 - Create a book from text or import a digital PDF through the Android file picker.
