@@ -1,6 +1,6 @@
 # Credits
 
-The supplied `design/index.html` is the visual reference. Its embedded JPEG poster and WebM video are copied into Android resources. Its original SVG cover and diagrams are drawn with Compose Canvas.
+The supplied original design is the visual reference. Its embedded JPEG poster and WebM video are copied into Android resources. Its original SVG cover and diagrams are drawn with Compose Canvas.
 
 The motion credit in that design identifies GOES-16 imagery by CSU/CIRA and NOAA, public domain, via [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Ocean_waves_northeast_of_northern_South_America_(CIRA_2021-09-10).webm). The app retains this credit in Settings. The design is the provenance record for the bundled media.
 

@@ -15,7 +15,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.min
 
-/** Native ports of the original inline SVGs in design/index.html. */
+/** Native ports of the inline SVGs in the supplied original design. */
 @Composable
 fun CoverArt(modifier: Modifier = Modifier) {
     Drawing(320f, 160f, "A browser page connects to a service worker and a saved cache.", modifier) {
