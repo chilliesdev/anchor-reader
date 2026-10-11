@@ -52,9 +52,13 @@ internal enum class ProviderStreamReason(val label: String) {
     TEXT_PART("text_part"), TEXT_SHAPE("text_shape"), MESSAGE_PHASE_SHAPE("message_phase_shape"),
     MESSAGE_PHASE("message_phase"), RESULT_MISSING("result_missing"), RESULT_BLANK("result_blank"),
     RESULT_MULTIPLE("result_multiple"), RESULT_JSON("result_json"), UNEXPECTED("unexpected"),
+    RECOVERY_CONFLICT("recovery_conflict"),
 }
 
-/** Contains only constants and a bounded HTTP status. Never retains an exception or provider data. */
+internal enum class ProviderRequestFormat(val label: String) { JSON_SCHEMA_STREAM_NO_STORE("json_schema_stream_no_store") }
+internal enum class ProviderModelSupport(val label: String) { UNKNOWN("unknown") }
+
+/** Contains only constants, capped counts and a bounded HTTP status. Never retains raw provider data. */
 internal class ProviderFailureRecord private constructor(
     val stage: ProviderRequestStage,
     val exceptionLabel: ProviderExceptionLabel,
@@ -63,14 +67,20 @@ internal class ProviderFailureRecord private constructor(
     val failureKind: ProviderFailureKind?,
     val streamReason: ProviderStreamReason?,
     val media: ProviderStreamMedia?,
+    val streamEvidence: ProviderStreamEvidence?,
+    val requestFormat: ProviderRequestFormat?,
 ) {
     fun line(): String = "stage=${stage.label} class=${exceptionLabel.label} code=${reason.label}" +
         (httpStatus?.let { " status=$it" } ?: "") + (failureKind?.let { " failure_kind=${it.diagnosticLabel()}" } ?: "") +
         (streamReason?.let { " stream=${it.label}" } ?: "") + (media?.let { " media=${it.label}" } ?: "")
 
+    fun evidenceLine(): String? = if (streamEvidence == null && requestFormat == null) null else
+        "evidence=responses" + (requestFormat?.let { " request=${it.label} model_support=${ProviderModelSupport.UNKNOWN.label}" } ?: "") +
+            (streamEvidence?.let { " ${it.line()}" } ?: "")
+
     companion object {
         fun classify(stage: ProviderRequestStage, error: Exception, httpStatus: Int?,
-            media: ProviderStreamMedia? = null): ProviderFailureRecord? {
+            media: ProviderStreamMedia? = null, requestFormat: ProviderRequestFormat? = null): ProviderFailureRecord? {
             if (error is CancellationException) return null
             val exceptionLabel = when (error) {
                 is ProviderException -> ProviderExceptionLabel.PROVIDER
@@ -99,7 +109,8 @@ internal class ProviderFailureRecord private constructor(
                 ProviderExceptionLabel.STATE, ProviderExceptionLabel.OTHER -> ProviderDiagnosticReason.OTHER
             }
             return ProviderFailureRecord(stage, exceptionLabel, reason, httpStatus?.takeIf { it in 100..599 },
-                (error as? ProviderException)?.kind, (error as? ProviderException)?.streamReason, media)
+                (error as? ProviderException)?.kind, (error as? ProviderException)?.streamReason, media,
+                (error as? ProviderException)?.streamEvidence, requestFormat)
         }
     }
 }
@@ -114,7 +125,27 @@ private fun ProviderFailureKind.diagnosticLabel(): String = when (this) {
 
 internal fun interface ProviderFailureSink { fun record(failure: ProviderFailureRecord) }
 
+/** A successful parser branch marker. Question/source validation still runs after this marker. */
+internal class ProviderCompletionRecord private constructor(private val finalizedItems: Int) {
+    fun line() = "completion_source=finalized_empty_terminal finalized_items=$finalizedItems terminal_status=completed"
+    companion object {
+        fun finalizedEmptyTerminal(count: Int): ProviderCompletionRecord {
+            require(count in 1..32)
+            return ProviderCompletionRecord(count)
+        }
+    }
+}
+
+internal fun interface ProviderCompletionSink { fun record(completion: ProviderCompletionRecord) }
+
+internal object AndroidProviderCompletionSink : ProviderCompletionSink {
+    override fun record(completion: ProviderCompletionRecord) { Log.i(AndroidProviderFailureSink.TAG, completion.line()) }
+}
+
 internal object AndroidProviderFailureSink : ProviderFailureSink {
     const val TAG = "AnchorReaderChatGpt"
-    override fun record(failure: ProviderFailureRecord) { Log.w(TAG, failure.line()) }
+    override fun record(failure: ProviderFailureRecord) {
+        Log.w(TAG, failure.line())
+        failure.evidenceLine()?.let { Log.w(TAG, it) }
+    }
 }

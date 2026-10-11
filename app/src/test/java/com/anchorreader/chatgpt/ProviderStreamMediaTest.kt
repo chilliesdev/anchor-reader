@@ -20,6 +20,50 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ProviderStreamMediaTest {
+    @Test fun completedEmptyTerminalRecoversOneFinalizedResultAndEmitsOnlyTheFixedBranchMarker() = runBlocking {
+        val fixture = MediaFixture(emptyMap(), diagnosticResponsesCallLimit = 1)
+        fixture.body = emptyTerminalRecoveryMediaEvent(fixture.output)
+        assertEquals(fixture.output, fixture.response())
+        assertEquals("completion_source=finalized_empty_terminal finalized_items=1 terminal_status=completed", fixture.completions.single().line())
+        assertTrue(fixture.records.isEmpty())
+        assertEquals("Generation stopped. Your book and ready questions are saved.", fixture.failure().message)
+        fixture.assertTransportCleanup(2, 1)
+        assertEquals(1, fixture.completions.size)
+    }
+
+    @Test fun throwingRecoverySinkCannotChangeTheResultCleanupOrSpentCap() = runBlocking {
+        val fixture = MediaFixture(emptyMap(), diagnosticResponsesCallLimit = 1)
+        fixture.body = emptyTerminalRecoveryMediaEvent(fixture.output)
+        fixture.completionSinkFailure = IllegalStateException("FAKE_SECRET_COMPLETION_SINK")
+        assertEquals(fixture.output, fixture.response())
+        fixture.assertTransportCleanup(1, 1)
+        assertEquals(1, fixture.completions.size)
+        assertTrue(fixture.records.isEmpty())
+        fixture.failure()
+        fixture.assertTransportCleanup(2, 1)
+    }
+
+    @Test fun boundedStreamEvidenceAndRequestConfigurationReachTheFailureSinkWithoutSpendingAnotherCall() = runBlocking {
+        val fixture = MediaFixture(emptyMap(), diagnosticResponsesCallLimit = 1)
+        fixture.body = mediaEvent("response.output_text.delta", JSONObject().put("delta", "FAKE_SECRET_DELTA")) +
+            mediaEvent("response.completed", JSONObject().put("response", JSONObject().put("status", "completed").put("output", JSONArray())
+                .put("usage", JSONObject().put("input_tokens", 20).put("output_tokens", 0).put("total_tokens", 20))))
+        fixture.sinkFailure = IllegalStateException("FAKE_SECRET_SINK")
+        assertEquals(ProviderStreamReason.OUTPUT_EMPTY, fixture.failure().streamReason)
+        val record = fixture.records.single()
+        val line = record.evidenceLine()!!
+        assertTrue(line.startsWith("evidence=responses request=json_schema_stream_no_store model_support=unknown "))
+        for (field in listOf("deltas=1", "delta_text=1", "terminal_output=empty", "input_tokens=20", "output_tokens=0")) {
+            assertTrue(field in line.split(' '))
+        }
+        assertFalse(line.contains("FAKE_SECRET"))
+        assertFalse(line.contains(fixture.account))
+        assertTrue(line.length < 1024)
+        assertEquals("Generation stopped. Your book and ready questions are saved.", fixture.failure().message)
+        fixture.assertTransportCleanup(2, 1)
+        assertNull(fixture.records.last().streamEvidence)
+    }
+
     @Test fun asciiSseCaseParametersAndHeaderNamesReachCompletedOutput() = runBlocking {
         val headers = listOf(
             "Content-Type" to "text/event-stream",
@@ -417,6 +461,7 @@ private class MediaFixture(var headers: Map<String, List<String>>, diagnosticRes
     var responseReadFailure: Exception? = null
     var responseBytes: ByteArray? = null
     var sinkFailure: Exception? = null
+    var completionSinkFailure: Exception? = null
     var beforeResponseReply: (() -> Unit)? = null
     var cancellations = 0
     var modelCalls = 0
@@ -426,6 +471,7 @@ private class MediaFixture(var headers: Map<String, List<String>>, diagnosticRes
     val inputs = mutableListOf<TrackedInput>()
     private val modelInputs = mutableListOf<TrackedInput>()
     val records = mutableListOf<ProviderFailureRecord>()
+    val completions = mutableListOf<ProviderCompletionRecord>()
     private val requestBodies = mutableListOf<JSONObject>()
     val lastRequest: JSONObject get() = requestBodies.last()
     private val now = 1_800_000_000_000L
@@ -466,7 +512,8 @@ private class MediaFixture(var headers: Map<String, List<String>>, diagnosticRes
         override fun cancelAll() { cancellations++ }
     }
     private val provider = ChatGptProvider(store, transport, ProviderEndpoints(resource = "https://FAKE_SECRET_URL.test/v1"),
-        ProviderClock { now }, Dispatchers.Unconfined, ProviderFailureSink { records += it; sinkFailure?.let { error -> throw error } }, diagnosticResponsesCallLimit)
+        ProviderClock { now }, Dispatchers.Unconfined, ProviderFailureSink { records += it; sinkFailure?.let { error -> throw error } }, diagnosticResponsesCallLimit,
+        ProviderCompletionSink { completions += it; completionSinkFailure?.let { error -> throw error } })
 
     suspend fun response(source: String = "FAKE_SECRET_SOURCE", schema: JSONObject = JSONObject().put("type", "object"),
         instructions: String = "FAKE_SECRET_INSTRUCTIONS", accountId: String = account) = provider.response(accountId, instructions, source, schema)
@@ -534,4 +581,11 @@ private class TrackedInput(value: String, private val failure: Exception? = null
     override fun read(): Int { readCalls++; failure?.let { throw it }; return super.read() }
     override fun read(bytes: ByteArray, offset: Int, length: Int): Int { readCalls++; failure?.let { throw it }; return super.read(bytes, offset, length) }
     override fun close() { closed = true; super.close() }
+}
+
+private fun emptyTerminalRecoveryMediaEvent(result: String): String {
+    val message = JSONObject().put("type", "message").put("role", "assistant").put("status", "completed")
+        .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", result)))
+    return mediaEvent("response.output_item.done", JSONObject().put("output_index", 0).put("item", message)) +
+        mediaEvent("response.completed", JSONObject().put("response", JSONObject().put("status", "completed").put("output", JSONArray())))
 }

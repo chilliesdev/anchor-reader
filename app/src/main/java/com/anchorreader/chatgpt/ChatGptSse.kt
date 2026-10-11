@@ -11,8 +11,10 @@ import java.net.SocketTimeoutException
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
-/** Only the completed response is authoritative. Partial deltas are never returned. */
-internal fun readCompletedResponse(input: InputStream): String {
+/** Completion is required. Only terminal output or bounded finalized items supply text; never deltas. */
+internal fun readCompletedResponse(input: InputStream, onRecovery: (ProviderCompletionRecord) -> Unit = {}): String {
+    val observer = ProviderStreamObserver()
+    val recoveryGuard = ProviderRecoveryGuard()
     val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
         .onUnmappableCharacter(CodingErrorAction.REPORT)
     val reader = InputStreamReader(StreamByteLimit(input, 1024 * 1024), decoder)
@@ -33,6 +35,8 @@ internal fun readCompletedResponse(input: InputStream): String {
         val type = event.optString("type", eventName)
         if (eventName.isNotEmpty() && event.has("type") && type != eventName) throw invalidStream(EVENT_TYPE)
         eventName = ""
+        observer.observe(type, event)
+        recoveryGuard.observe(type, event)
         when (type) {
             "response.output_text.delta" -> {
                 deltaBytes += streamField(DELTA_SHAPE) { event.getString("delta") }.toByteArray(Charsets.UTF_8).size
@@ -58,10 +62,14 @@ internal fun readCompletedResponse(input: InputStream): String {
                 if (completedItemText(item) != null) {
                     if (finalizedResult) throw invalidStream(RESULT_MULTIPLE)
                     finalizedResult = true
+                    observer.acceptedFinalItem()
                 }
                 finalized[index] = item
             }
-            "response.completed" -> return completedText(streamField(COMPLETED_RESPONSE) { event.getJSONObject("response") }, finalized.values)
+            "response.completed" -> return completedText(streamField(COMPLETED_RESPONSE) { event.getJSONObject("response") },
+                finalized.values, recoveryGuard.hasConflict) { count ->
+                    runCatching { onRecovery(ProviderCompletionRecord.finalizedEmptyTerminal(count)) }
+                }
         }
         return null
     }
@@ -103,23 +111,27 @@ internal fun readCompletedResponse(input: InputStream): String {
         // A terminal event still needs its SSE blank-line delimiter.
         throw invalidStream(if (sawData) MISSING_COMPLETED else NO_SSE_DATA)
     } catch (error: ProviderException) {
-        throw error
+        throw ProviderException(error.kind, error.message!!, error.streamReason ?: UNEXPECTED, observer.snapshot())
     } catch (_: CharacterCodingException) {
-        throw invalidStream(INVALID_UTF8)
+        throw invalidStream(INVALID_UTF8, observer.snapshot())
     } catch (_: SocketTimeoutException) {
-        throw invalidStream(READ_TIMEOUT)
+        throw invalidStream(READ_TIMEOUT, observer.snapshot())
     } catch (_: IOException) {
-        throw invalidStream(READ_IO)
+        throw invalidStream(READ_IO, observer.snapshot())
     } catch (_: Exception) {
-        throw invalidStream(UNEXPECTED)
+        throw invalidStream(UNEXPECTED, observer.snapshot())
     }
 }
 
-private fun completedText(response: JSONObject, finalized: Collection<JSONObject>): String {
+private fun completedText(response: JSONObject, finalized: Collection<JSONObject>, recoveryConflict: Boolean,
+    onRecovered: (Int) -> Unit): String {
     if (response.optString("status") != "completed") throw invalidStream(COMPLETED_STATUS)
     if (!response.isNull("error")) throw invalidStream(COMPLETED_ERROR)
     if (response.has("incomplete_details") && !response.isNull("incomplete_details")) throw invalidStream(COMPLETED_INCOMPLETE)
-    val output = if (response.isNull("output")) JSONArray(finalized) else streamField(OUTPUT_SHAPE) { response.getJSONArray("output") }
+    val emptyTerminal = response.optJSONArray("output")?.length() == 0
+    if (emptyTerminal && recoveryConflict) throw invalidStream(RECOVERY_CONFLICT)
+    val output = if (response.isNull("output") || emptyTerminal) JSONArray(finalized)
+        else streamField(OUTPUT_SHAPE) { response.getJSONArray("output") }
     if (output.length() !in 1..32) throw invalidStream(when {
         response.isNull("output") && finalized.isEmpty() -> OUTPUT_MISSING
         output.length() == 0 -> OUTPUT_EMPTY
@@ -127,7 +139,9 @@ private fun completedText(response: JSONObject, finalized: Collection<JSONObject
     })
     var text: String? = null
     for (index in 0 until output.length()) {
-        completedItemText(streamField(OUTPUT_ITEM) { output.getJSONObject(index) })?.let {
+        val item = streamField(OUTPUT_ITEM) { output.getJSONObject(index) }
+        completedItemText(item)?.let {
+            if (emptyTerminal && item.opt("status") != "completed") throw invalidStream(MESSAGE_STATUS)
             if (text != null) throw invalidStream(RESULT_MULTIPLE)
             text = it
         }
@@ -139,6 +153,7 @@ private fun completedText(response: JSONObject, finalized: Collection<JSONObject
         val json = JSONTokener(result)
         if (json.nextValue() !is JSONObject || json.nextClean() != 0.toChar()) throw invalidStream(RESULT_JSON)
     }
+    if (emptyTerminal) onRecovered(finalized.size)
     return result
 }
 
@@ -173,8 +188,8 @@ private inline fun <T> streamField(reason: ProviderStreamReason, read: () -> T):
     throw invalidStream(reason)
 }
 
-private fun invalidStream(reason: ProviderStreamReason) = ProviderException(ProviderFailureKind.INVALID_RESPONSE,
-    "ChatGPT did not return complete questions. Try again.", reason)
+private fun invalidStream(reason: ProviderStreamReason, evidence: ProviderStreamEvidence? = null) = ProviderException(ProviderFailureKind.INVALID_RESPONSE,
+    "ChatGPT did not return complete questions. Try again.", reason, evidence)
 
 private class StreamByteLimit(private val input: InputStream, private val limit: Int) : InputStream() {
     private var count = 0
