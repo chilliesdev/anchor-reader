@@ -139,6 +139,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             onReplay = { model.cancelPlaybackRequest(); speakCurrent() }, onSpeed = { model.cancelPlaybackRequest(); narrator.changeSpeed() },
             onPrevious = { pauseAnd { model.previousConcept() } },
             onNext = { pauseAnd { model.nextConcept() } },
+            onConceptSettled = { index -> pauseAnd { model.selectConcept(index) } },
             onCheck = if (state.questions.any { it.unitIndex == state.currentProgress.unitIndex }) ({ pauseAnd { model.openRecall() } }) else null,
             onStill = { model.setStill(!state.stillMode) },
             onSource = { pauseAnd { dialog = "source" } },

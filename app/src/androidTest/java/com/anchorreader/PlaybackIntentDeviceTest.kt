@@ -1,6 +1,8 @@
 package com.anchorreader
 
 import androidx.activity.compose.setContent
+import android.os.ParcelFileDescriptor
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.Lifecycle
@@ -18,6 +20,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /** Controlled voice readiness and completion; real offline speech has separate device tests. */
 @RunWith(AndroidJUnit4::class)
@@ -107,6 +110,82 @@ class PlaybackIntentDeviceTest {
         assertEquals(Screen.PLAYER, model.state.value.screen)
         compose.onNodeWithText("Quick check").performClick()
         compose.waitUntil(10_000) { model.state.value.screen == Screen.CHECK }
+    }
+
+    @Test
+    fun previewAndCancelledSwipeDoNotRequestSpeechAndSettleStartsOnce() {
+        compose.runOnIdle { voice.ready(); model.start(countBook()) }
+        compose.waitUntil(10_000) { voice.spoken.size == 1 }
+        val request = model.state.value.playbackRequest
+        val oldCompletion = voice.callbacks.first()
+        compose.onNodeWithTag("concept_video").performTouchInput {
+            down(Offset(width * .4f, height * .8f))
+            moveBy(Offset(0f, -height * .6f), delayMillis = 700)
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("preview_sentence_1").assertIsDisplayed()
+        assertEquals(0, model.state.value.currentProgress.unitIndex)
+        assertEquals(request, model.state.value.playbackRequest)
+        assertEquals(1, voice.spoken.size)
+        compose.onNodeWithTag("concept_video").performTouchInput {
+            moveBy(Offset(0f, height * .5f), delayMillis = 700)
+            advanceEventTime(400)
+            up()
+        }
+        compose.waitForIdle()
+        assertEquals(request, model.state.value.playbackRequest)
+        assertEquals(1, voice.spoken.size)
+        compose.onNodeWithTag("concept_video").performTouchInput {
+            down(Offset(width * .4f, height * .8f))
+            moveBy(Offset(0f, -height * .6f), delayMillis = 700)
+            cancel()
+        }
+        compose.waitForIdle()
+        assertEquals(request, model.state.value.playbackRequest)
+        assertEquals(1, voice.spoken.size)
+        compose.onNodeWithTag("concept_video").performTouchInput {
+            swipe(start = Offset(width * .4f, height * .75f), end = Offset(width * .4f, height * .4f), durationMillis = 100)
+        }
+        compose.waitUntil(10_000) { model.state.value.currentProgress.unitIndex == 1 && voice.spoken.size == 2 }
+        compose.waitForIdle()
+        assertEquals(request + 1, model.state.value.playbackRequest)
+        compose.runOnIdle { oldCompletion() }
+        assertEquals(0, model.state.value.currentProgress.sentenceIndex)
+        assertEquals(2, voice.spoken.size)
+    }
+
+    @Test
+    fun nativeStillToggleImmediatelyFollowedBySwipeSelectsConcept() {
+        compose.runOnIdle { voice.ready(); model.setStill(true); model.start(SampleLesson.book) }
+        compose.waitUntil(10_000) { voice.spoken.size == 1 }
+        compose.onNodeWithContentDescription("Pause narration").performClick()
+        val frame = compose.onNodeWithTag("concept_video").fetchSemanticsNode().boundsInRoot
+        val toggle = compose.onNodeWithContentDescription("Turn off still mode").fetchSemanticsNode().boundsInRoot.center
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val x = (frame.left + frame.width * .4f).toInt()
+        val start = (frame.top + frame.height * .75f).toInt()
+        val end = (frame.top + frame.height * .15f).toInt()
+        // UiAutomation executes an argument list, not a shell command line. A script keeps
+        // both real input commands in one native stream without a settle wait between them.
+        val script = File(requireNotNull(context.getExternalFilesDir("qa-swipe")), "native-toggle-swipe.sh")
+        requireNotNull(script.parentFile).mkdirs()
+        script.writeText("exec 2>&1\nset -e\ninput tap ${toggle.x.toInt()} ${toggle.y.toInt()}\ninput swipe $x $start $x $end 400\n")
+        val descriptor = automation.executeShellCommand("sh ${script.absolutePath}")
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use {
+            // Drive Compose's test clock while the native input stream runs. Reading the
+            // pipe first blocks virtual frames until after both gestures have finished.
+            try {
+                compose.waitUntil(10_000) { model.state.value.currentProgress.unitIndex == 1 }
+            } catch (failure: Throwable) {
+                throw AssertionError("Native input: still=${model.state.value.stillMode}, unit=${model.state.value.currentProgress.unitIndex}, frame=$frame, toggle=$toggle", failure)
+            }
+            assertEquals("Unexpected native command output", "", it.readBytes().toString(Charsets.UTF_8))
+        }
+        script.delete()
+        compose.waitForIdle()
+        assertFalse(model.state.value.stillMode)
+        assertEquals(0, model.state.value.currentProgress.sentenceIndex)
+        assertEquals(2, voice.spoken.size)
     }
 
     @Test
