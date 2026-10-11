@@ -13,6 +13,8 @@ captures/
 artifacts/*.apk
 artifacts/*.aab
 artifacts/*.idsig
+release-assets/
+__pycache__/
 
 # Local compiler state, credentials, and QA evidence
 .kotlin/

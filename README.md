@@ -72,6 +72,8 @@ Physical phones, spoken TalkBack, other Android API levels, screen-lock/audio-fo
 
 ## Signing
 
+Public signed APKs, signed AABs, checksums and change notes are published to [GitHub Releases](https://github.com/chilliesdev/anchor-reader/releases) after checks pass for each new `main` push. See [release setup, versions and safe reruns](docs/RELEASES.md). Existing local previews use a different signing certificate; keep needed books/progress and original sources before planning a migration. Uninstalling removes local data.
+
 ```sh
 ./scripts/build.sh :app:assembleRelease :app:bundleRelease
 ```

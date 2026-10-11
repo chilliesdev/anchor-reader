@@ -9,6 +9,28 @@ require(diagnosticResponsesCallLimit == "0" || diagnosticResponsesCallLimit == "
     "anchorDiagnosticResponsesCallLimit must be 0 or 1."
 }
 
+val releaseCode = providers.gradleProperty("anchorVersionCode").orNull
+val releaseName = providers.gradleProperty("anchorVersionName").orNull
+require((releaseCode == null) == (releaseName == null)) {
+    "Set both anchorVersionCode and anchorVersionName."
+}
+val parsedReleaseCode = releaseCode?.toIntOrNull()
+require(releaseCode == null || (parsedReleaseCode != null && parsedReleaseCode in 1..2_100_000_000)) {
+    "anchorVersionCode must be an integer from 1 to 2100000000."
+}
+require(releaseName == null || releaseName.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+"))) {
+    "anchorVersionName must have three numeric parts, for example 1.0.2."
+}
+val signingValues = listOf("ANCHOR_KEYSTORE", "ANCHOR_STORE_PASSWORD", "ANCHOR_KEY_ALIAS", "ANCHOR_KEY_PASSWORD")
+    .associateWith { providers.environmentVariable(it).orNull }
+val hasSigning = signingValues.values.all { !it.isNullOrBlank() }
+require(signingValues.values.all { it == null } || hasSigning) {
+    "Set all four ANCHOR signing variables, or none."
+}
+val requireSigning = providers.gradleProperty("anchorRequireSigning").getOrElse("false")
+require(requireSigning == "true" || requireSigning == "false") { "anchorRequireSigning must be true or false." }
+require(requireSigning != "true" || hasSigning) { "This release requires the ANCHOR signing variables." }
+
 android {
     namespace = "com.anchorreader"
     compileSdk = 35
@@ -26,13 +48,12 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            val store = providers.environmentVariable("ANCHOR_KEYSTORE")
-            if (store.isPresent) {
+            if (hasSigning) {
                 signingConfig = signingConfigs.create("production") {
-                    storeFile = file(store.get())
-                    storePassword = providers.environmentVariable("ANCHOR_STORE_PASSWORD").get()
-                    keyAlias = providers.environmentVariable("ANCHOR_KEY_ALIAS").get()
-                    keyPassword = providers.environmentVariable("ANCHOR_KEY_PASSWORD").get()
+                    storeFile = file(signingValues.getValue("ANCHOR_KEYSTORE")!!)
+                    storePassword = signingValues.getValue("ANCHOR_STORE_PASSWORD")
+                    keyAlias = signingValues.getValue("ANCHOR_KEY_ALIAS")
+                    keyPassword = signingValues.getValue("ANCHOR_KEY_PASSWORD")
                 }
             }
         }
@@ -44,6 +65,18 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
     packaging { resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/NOTICE") }
+}
+
+// CI versions apply only to public releases. Local/debug builds keep their default version.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        if (parsedReleaseCode != null && releaseName != null) {
+            variant.outputs.forEach { output ->
+                output.versionCode.set(parsedReleaseCode)
+                output.versionName.set(releaseName)
+            }
+        }
+    }
 }
 
 dependencies {

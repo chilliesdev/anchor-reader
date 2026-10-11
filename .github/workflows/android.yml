@@ -1,23 +1,140 @@
 name: Android
+
 on:
   push:
+    branches: ['**']
   pull_request:
+
 permissions:
   contents: read
+
 jobs:
-  build:
+  checks:
+    name: Build, tests and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
+      - name: Install required Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Test release safeguards
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Build, tests and lint
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
+      - name: Save test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
-          name: AnchorReader-debug
+          name: AnchorReader-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  release:
+    name: Publish signed Android release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # Retain queued main pushes. The default queue replaces earlier pending runs.
+    concurrency:
+      group: anchor-reader-main-releases
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install required Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Set release version
+        run: python3 scripts/github_release.py version >> "$GITHUB_ENV"
+      - name: Prepare signing key
+        env:
+          ANCHOR_KEYSTORE_BASE64: ${{ secrets.ANCHOR_KEYSTORE_BASE64 }}
+          ANCHOR_STORE_PASSWORD: ${{ secrets.ANCHOR_STORE_PASSWORD }}
+          ANCHOR_KEY_ALIAS: ${{ secrets.ANCHOR_KEY_ALIAS }}
+          ANCHOR_KEY_PASSWORD: ${{ secrets.ANCHOR_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          names = ('ANCHOR_KEYSTORE_BASE64', 'ANCHOR_STORE_PASSWORD', 'ANCHOR_KEY_ALIAS', 'ANCHOR_KEY_PASSWORD')
+          if any(not os.environ.get(name) for name in names):
+              raise SystemExit('Configure all four ANCHOR signing secrets. See docs/RELEASES.md.')
+          path = Path(os.environ['RUNNER_TEMP']) / 'anchor-reader-release.keystore'
+          path.write_bytes(base64.b64decode(os.environ['ANCHOR_KEYSTORE_BASE64'], validate=True))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'ANCHOR_KEYSTORE={path}\n')
+          PY
+      - name: Build signed release
+        env:
+          ANCHOR_STORE_PASSWORD: ${{ secrets.ANCHOR_STORE_PASSWORD }}
+          ANCHOR_KEY_ALIAS: ${{ secrets.ANCHOR_KEY_ALIAS }}
+          ANCHOR_KEY_PASSWORD: ${{ secrets.ANCHOR_KEY_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease :app:bundleRelease \
+            -PanchorRequireSigning=true \
+            -PanchorVersionCode="$ANCHOR_VERSION_CODE" \
+            -PanchorVersionName="$ANCHOR_VERSION_NAME" --console=plain
+      - name: Verify and prepare release assets
+        env:
+          ANCHOR_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          SDK_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$SDK_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$SDK_TOOLS/zipalign" -c -P 16 -v 4 "$APK"
+          "$SDK_TOOLS/aapt" dump badging "$APK" > "$RUNNER_TEMP/anchor-reader-badging.txt"
+          python3 scripts/github_release.py assets --badging "$RUNNER_TEMP/anchor-reader-badging.txt"
+          jarsigner -J-Duser.language=en -verify app/build/outputs/bundle/release/app-release.aab \
+            > "$RUNNER_TEMP/anchor-reader-bundle-signature.txt"
+          cat "$RUNNER_TEMP/anchor-reader-bundle-signature.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          report = Path(os.environ['RUNNER_TEMP']) / 'anchor-reader-bundle-signature.txt'
+          if 'jar verified.' not in report.read_text():
+              raise SystemExit('Release bundle is not signed and verified.')
+          PY
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANCHOR_SOURCE_SHA: ${{ github.sha }}
+          ANCHOR_PUSH_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/github_release.py publish
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/anchor-reader-release.keystore"
