@@ -146,6 +146,21 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("Direct push commit", create["body"])
         self.assertEqual(calls[-1][2], {"draft": False, "make_latest": "true"})
 
+    def test_public_notes_report_measured_recovery_and_keep_untested_limits(self):
+        calls = self.run_publish()
+        body = next(payload["body"] for _, method, payload in calls if method == "POST" and payload.get("draft"))
+        for evidence in ("11 October 2026", "cap1 diagnostic APK", "API37 emulator", "six source-valid questions",
+                         "two READY sections", "correct/wrong feedback", "offline practice", "restart persistence",
+                         "178 JVM tests", "62 isolated native device tests"):
+            with self.subTest(evidence=evidence):
+                self.assertIn(evidence, body)
+        self.assertIn("Other accounts/models, physical devices and provider billing remain unverified", body)
+        self.assertIn("upstream empty-output cause remains unknown", body)
+        self.assertNotIn("latest measured live test failed", body)
+        self.assertNotIn("generation remains unverified as working", body)
+        self.assertNotIn(".tmp/", body)
+        self.assertNotIn("reports/", body)
+
     def test_new_tag_points_to_exact_tested_commit(self):
         calls = self.run_publish(missing_tag=True)
         tag = next(payload for endpoint, _, payload in calls if endpoint.endswith("/git/refs"))
