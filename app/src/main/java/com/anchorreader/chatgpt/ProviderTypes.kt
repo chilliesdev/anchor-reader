@@ -22,15 +22,19 @@ enum class ProviderFailureKind { AUTH, NO_PLAN, LIMIT, NETWORK, INVALID_RESPONSE
 class ProviderException : Exception {
     val kind: ProviderFailureKind
     internal val streamReason: ProviderStreamReason?
+    internal val streamEvidence: ProviderStreamEvidence?
 
     constructor(kind: ProviderFailureKind, message: String) : super(message) {
         this.kind = kind
         streamReason = null
+        streamEvidence = null
     }
 
-    internal constructor(kind: ProviderFailureKind, message: String, streamReason: ProviderStreamReason) : super(message) {
+    internal constructor(kind: ProviderFailureKind, message: String, streamReason: ProviderStreamReason,
+        streamEvidence: ProviderStreamEvidence? = null) : super(message) {
         this.kind = kind
         this.streamReason = streamReason
+        this.streamEvidence = streamEvidence
     }
 }
 
