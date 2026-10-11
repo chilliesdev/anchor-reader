@@ -1,4 +1,12 @@
-# Native app review
+# Full-page concept swipe review
+
+11 October 2026. Independent review **PASSED**. Zero Standards or Spec findings. Reviewed four application/test files against base `483bc410f58a859e750b2b1bb11d6737818970b5`; diff SHA-256 `0ed00e2d54bc0bf267f893316e298efbf4a838c3854fdad775be7e6b4ee89238`.
+
+Review covered complete page ownership, preview content, disabled moving controls, one settlement, sentence-one autoplay, video lifecycle and native input delivery. The test input correction keeps the original assertions and deadline. No timeout increase or suppression.
+
+[Complete review](../reports/full-page-swipe-preview-20261011/REVIEW_FEEDBACK.md), [input/timeout diagnosis](../reports/full-page-swipe-preview-20261011/FIX_DIAGNOSIS.md), [QA](QA_RESULTS.md), [UI audit](UI_AUDIT.md).
+
+## Previous PDF questions review
 
 11 October 2026. Independent review **PASSED** for the PDF questions preview. Zero required findings remain. Final app hashes are preserved in the [source manifest](../reports/pdf-questions-preview-20261011/pdf-questions-final-source-sha256.json).
 

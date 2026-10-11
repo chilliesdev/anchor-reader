@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -28,29 +29,65 @@ class PlayerSwipeDeviceTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun heldDragPreviewsAdjacentSentenceAndKeepsControlsFixedUntilSettled() {
-        val state = player()
-        val before = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot
-        val controls = compose.onNodeWithTag("sentence_count").fetchSemanticsNode().boundsInRoot
-        screenshot("gesture-start")
+    fun heldDragMovesCompleteStillPageAndPreviewsAdjacentConcept() = heldPage(still = true)
+
+    @Test
+    fun heldDragMovesCompleteVideoPageAndPreviewsAdjacentConcept() = heldPage(still = false)
+
+    private fun heldPage(still: Boolean) {
+        val state = player(still = still, sentence = 1)
+        val tags = listOf("concept_background_0", "concept_header_0", "concept_art_0", "concept_title_0", "current_sentence", "concept_actions_0", "concept_footer_0", "sentence_count", "sentence_progress") + if (still) emptyList() else listOf("concept_background_video_0")
+        val before = tags.associateWith { compose.onNodeWithTag(it).getUnclippedBoundsInRoot().top.value }
+        val name = if (still) "still" else "video"
+        compose.onNodeWithTag("sentence_count").assertTextEquals("2 / 2")
+        screenshot("$name-gesture-start")
         compose.onNodeWithTag("concept_video").performTouchInput {
             down(Offset(width * .4f, height * .8f))
             moveBy(Offset(0f, -height * .6f), delayMillis = 700)
         }
         compose.waitForIdle()
-        val dragged = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot
-        assertTrue("The sentence must track the finger before release", dragged.top < before.top - 100f)
+        val displacement = compose.onNodeWithTag("concept_background_0").getUnclippedBoundsInRoot().top.value - before.getValue("concept_background_0")
+        assertTrue("The complete page must track the finger before release", displacement < -100f)
+        tags.forEach { tag ->
+            assertEquals("$tag must move with its page", displacement, compose.onNodeWithTag(tag).getUnclippedBoundsInRoot().top.value - before.getValue(tag), 1f)
+        }
+        val outgoing = compose.onNodeWithTag("concept_page_0").getUnclippedBoundsInRoot()
+        val incoming = compose.onNodeWithTag("concept_page_1").getUnclippedBoundsInRoot()
+        assertEquals("Concept pages must meet without a gap", outgoing.bottom.value, incoming.top.value, 1f)
+        compose.onNodeWithTag("concept_header_1").assertIsDisplayed()
         compose.onNodeWithTag("preview_sentence_1").assertIsDisplayed()
-        assertEquals(controls, compose.onNodeWithTag("sentence_count").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithTag("preview_sentence_count_1").assertTextEquals("1 / 3")
+        compose.onAllNodesWithContentDescription("Next concept").assertCountEquals(1)
+        compose.onNodeWithContentDescription("Next concept").assertIsNotEnabled().performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithContentDescription(if (still) "Play narration" else "Pause narration").assertIsNotEnabled().performSemanticsAction(SemanticsActions.OnClick) { it() }
         assertEquals(0, state.unit)
+        assertEquals(1, state.sentence)
         assertEquals(emptyList<Int>(), state.commits)
-        screenshot("held-drag")
+        assertEquals(emptyList<String>(), state.actions)
+        screenshot("$name-held-drag")
         compose.onNodeWithTag("concept_video").performTouchInput { advanceEventTime(400); up() }
         compose.waitForIdle()
         assertEquals(listOf(1), state.commits)
+        assertEquals(0, state.sentence)
         compose.onNodeWithText("CONCEPT 2 OF 3").assertExists()
         compose.onNodeWithTag("current_sentence").assertTextEquals("Sentence in second concept.")
-        screenshot("gesture-settled")
+        screenshot("$name-gesture-settled")
+    }
+
+    @Test
+    fun stillToggleAndPageControlsRemainUsableAfterEachSettlement() {
+        val state = player()
+        compose.onNodeWithContentDescription("Turn off still mode").performClick()
+        assertEquals(false, state.still)
+        flingUp()
+        assertEquals(1, state.unit)
+        compose.onNodeWithContentDescription("Turn on still mode").performClick()
+        assertEquals(true, state.still)
+        flingDown()
+        assertEquals(0, state.unit)
+        compose.onNodeWithContentDescription("Play narration").performClick()
+        assertEquals(listOf("play"), state.actions)
+        assertEquals(listOf(1, 0), state.commits)
     }
 
     @Test
@@ -73,6 +110,7 @@ class PlayerSwipeDeviceTest {
         }
         compose.waitForIdle()
         assertEquals("Reversal selected a concept", 0, state.unit)
+        screenshot("gesture-reversed")
         compose.onNodeWithTag("concept_video").performTouchInput {
             down(Offset(width * .4f, height * .7f))
             moveBy(Offset(0f, -height * .6f), delayMillis = 700)
@@ -80,6 +118,7 @@ class PlayerSwipeDeviceTest {
         }
         compose.waitForIdle()
         assertEquals("ACTION_CANCEL selected a concept", 0, state.unit)
+        screenshot("gesture-cancelled")
         compose.onNodeWithTag("concept_video").performTouchInput {
             swipe(start = Offset(width * .2f, height * .3f), end = Offset(width * .8f, height * .3f))
         }
@@ -174,16 +213,16 @@ class PlayerSwipeDeviceTest {
         compose.onNodeWithText("CONCEPT 1 OF 2").assertExists()
     }
 
-    private fun player(): PlayerState {
-        val state = PlayerState()
+    private fun player(still: Boolean = true, sentence: Int = 0): PlayerState {
+        val state = PlayerState().apply { this.still = still; this.sentence = sentence }
         compose.setContent {
             AnchorTheme {
-                PlayerScreen(state.book, Progress(unitIndex = state.unit), VoiceState(ready = true, initializing = false), true, false,
-                    onBack = {}, onTranscript = {}, onPlay = {}, onReplay = {}, onSpeed = {},
-                    onPrevious = { state.unit = (state.unit - 1).coerceAtLeast(0) },
-                    onNext = { state.unit = (state.unit + 1).coerceAtMost(2) },
-                    onConceptSettled = { state.commits += it; state.unit = it },
-                    onCheck = null, onStill = {}, onSource = {}, onVoiceSettings = {}, onPreviousSentence = {}, onNextSentence = {})
+                PlayerScreen(state.book, Progress(unitIndex = state.unit, sentenceIndex = state.sentence), VoiceState(ready = true, initializing = false, playing = !state.still), state.still, false,
+                    onBack = {}, onTranscript = {}, onPlay = { state.actions += "play" }, onReplay = {}, onSpeed = {},
+                    onPrevious = { state.unit = (state.unit - 1).coerceAtLeast(0); state.sentence = 0 },
+                    onNext = { state.unit = (state.unit + 1).coerceAtMost(2); state.sentence = 0 },
+                    onConceptSettled = { state.commits += it; state.unit = it; state.sentence = 0 },
+                    onCheck = null, onStill = { state.still = !state.still }, onSource = {}, onVoiceSettings = {}, onPreviousSentence = {}, onNextSentence = {})
             }
         }
         return state
@@ -214,11 +253,14 @@ class PlayerSwipeDeviceTest {
 
     private class PlayerState {
         var unit by mutableIntStateOf(0)
+        var sentence by mutableIntStateOf(0)
+        var still by mutableStateOf(true)
         var book by mutableStateOf(Book("swipe", "Swipe test", "QA", listOf(
-            Concept("First concept", listOf("Sentence in first concept.")),
-            Concept("Second concept", listOf("Sentence in second concept.")),
+            Concept("First concept", listOf("Sentence in first concept.", "Another sentence in first concept.")),
+            Concept("Second concept", listOf("Sentence in second concept.", "Another second sentence.", "Third second sentence.")),
             Concept("Third concept", listOf("Sentence in third concept.")),
         ), "Original text"))
         val commits = mutableListOf<Int>()
+        val actions = mutableListOf<String>()
     }
 }

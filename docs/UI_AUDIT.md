@@ -1,4 +1,14 @@
-# Native PDF practice UI audit
+# Full-page concept swipe UI audit
+
+11 October 2026. Independent rendered audit **PASSED**. The entire concept page moves: background/video, header, artwork, sentence, actions, count, progress and playback footer. Adjacent pages meet without a blank strip. Each preview has its own concept content. Moving controls do not trigger actions. Android system bars remain outside the page.
+
+Still/video layouts passed at phone 411 dp, narrow 320 dp, tablet 800 dp and 200% font. Actual sample landscape, source/transcript controls and long sentence scroll passed. Up/down, reverse and cancel states were checked. Final production bytes match the audited debug APK.
+
+[Complete audit](../reports/full-page-swipe-preview-20261011/UI_AUDIT.md), [process/result evidence](../reports/full-page-swipe-preview-20261011/UI_EVIDENCE.md), [QA](QA_RESULTS.md), [release handoff](../reports/full-page-swipe-preview-20261011/release/HANDOFF.md).
+
+Physical touch feel, measured frame rate, acoustic speech and spoken TalkBack remain unverified. No live provider request was made. Prior practice audit follows unchanged.
+
+## Previous PDF practice audit
 
 11 October 2026. Independent rendered audit **PASSED**. Actual Android APK checked at 320/411dp, 800dp tablet, landscape and 200% font. Default-off import, source-transfer notice, saved book before browser, cancellation, add later, practice/source/return, task statuses and connection-reset confirmation were inspected.
 

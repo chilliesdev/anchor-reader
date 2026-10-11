@@ -6,7 +6,7 @@ A native Android reader based on the supplied original design. Kotlin and Jetpac
 
 - Create a book from text or import a digital PDF through the Android file picker.
 - Read one complete sentence at a time. Source sections form concepts, including sections across PDF pages.
-- Start offline device narration from a book, Continue or a concept. Swipe up/down to change concept. Pages follow your finger and snap into place after release. Pause, change speed or use still mode.
+- Start offline device narration from a book, Continue or a concept. Swipe up/down to change concept. The entire page follows your finger: background, video, header, artwork, text, actions and footer. It snaps into place after release. Pause, change speed or use still mode.
 - Open the retained original PDF, lesson outline or full text. PDF cards show its original first page.
 - On each new PDF import, **Add practice questions** starts off. Save without it to read locally.
 - Turn it on to save the book, then connect to ChatGPT. The form explains that section text goes to OpenAI and uses the connected ChatGPT plan. Cancellation or an error keeps the saved book readable.
@@ -21,7 +21,7 @@ A native Android reader based on the supplied original design. Kotlin and Jetpac
 
 Section detection uses source headings, font differences and PDF bookmarks. Sections can span paragraphs/pages. A source without clear section evidence becomes one `Full document` concept. This does not generate summaries. Each complete sentence remains one reading step, even when long. Narration stops at the final sentence of a concept; source/transcript dialogs and background return stay paused.
 
-Concept pages fill the player and have no gap. A drag shows the adjacent concept while the controls stay fixed. A preview does not change saved progress or start speech. When the page settles, the selected concept starts at sentence one and requests autoplay once. A fast fling moves at most one page. Short, reversed, horizontal or cancelled gestures keep the current concept; the first and last concepts have no wrap. Long sentences scroll before a swipe can pass their scroll edge to the page. Swipes do not open a quiz or finish screen. Next, Previous and the outline keep the page and reading state in step.
+Concept pages fill the player and have no gap. A drag moves the entire page and shows the adjacent concept with its own background, header, artwork, text, actions, count and footer. Moving and preview controls cannot trigger an action. A preview does not change saved progress or start speech. When the page settles, the selected concept starts at sentence one and requests autoplay once. A fast fling moves at most one page. Short, reversed, horizontal or cancelled gestures keep the current concept; the first and last concepts have no wrap. Long sentences scroll before a swipe can pass their scroll edge to the page. Swipes do not open a quiz or finish screen. Next, Previous and the outline keep the page and reading state in step.
 
 PDF extraction can change reading order; check the original source. An image-only first-page cover is accepted with digital body text. Scanned body pages, encrypted and damaged PDFs return an error. Maximum input: 25 MiB, 200 pages and one million text characters. No OCR or cloud conversion is included. A missing original PDF cannot be rebuilt from extracted text.
 
@@ -53,7 +53,9 @@ The script can use Android Studio's bundled JDK on macOS. Set `JAVA_HOME` and `A
 
 The links in this section refer to local build and QA files. These files are not included in the public repository. Build the app with the commands above.
 
-Concept swipe preview: [signed APK](artifacts/AnchorReader-concept-swipe-preview.apk), SHA-256 `dd9e46e270d0b72342e07a6b76cc6c236612e012dd954ce9fea72497c4706894`; [unsigned AAB](artifacts/AnchorReader-concept-swipe-preview-unsigned.aab), SHA-256 `73f69010394b3006544393878a731ab1c41291d67e51fc82acf8c5abfce576f3`. Local build, 141 JVM tests, lint, 58 device tests and signed APK install/smoke passed. One initial storage-test timeout passed in an isolated retry and a complete unchanged-APK retry; its cause remains unknown. The independent rendered audit passed at phone 411dp, narrow 320dp, tablet 800dp, landscape and 200% font. Both immediate still-mode tap/swipe directions passed. Signature, development certificate, 16 KiB alignment and installed-byte equality passed. [Complete handoff and evidence](reports/concept-swipe-preview-20261011/release/HANDOFF.md).
+Full-page swipe preview: [signed APK](artifacts/AnchorReader-full-page-swipe-preview-20261011.apk), SHA-256 `708d78a1f05574e1a2a9437b9fbbdc225ef373b7013934f455a0efdecab8d370`; [unsigned AAB](artifacts/AnchorReader-full-page-swipe-preview-20261011-unsigned.aab), SHA-256 `290603c009f6249b73d5d946b23bd32d7695bfd8880dda61d781c7e19f9b2a04`. The entire page moves in still and video modes. Independent UI audit and review passed. Final full device run passed 60/60 with zero skips. Native build passed: 141 JVM tests, zero lint errors and 15 existing warnings. Signed optimized APK install, whole-page still/video smoke, v2/v3 signature, 16 KiB alignment and installed-byte equality passed. Earlier failed runs and their diagnoses remain in the [QA report](reports/full-page-swipe-preview-20261011/QA_REPORT.md). See the [release handoff and durable evidence](reports/full-page-swipe-preview-20261011/release/HANDOFF.md). Prior preview/demo files and checksum entries are preserved.
+
+Earlier concept swipe preview: [signed APK](artifacts/AnchorReader-concept-swipe-preview.apk), SHA-256 `dd9e46e270d0b72342e07a6b76cc6c236612e012dd954ce9fea72497c4706894`; [unsigned AAB](artifacts/AnchorReader-concept-swipe-preview-unsigned.aab), SHA-256 `73f69010394b3006544393878a731ab1c41291d67e51fc82acf8c5abfce576f3`. Local build, 141 JVM tests, lint, 58 device tests and signed APK install/smoke passed. One initial storage-test timeout passed in an isolated retry and a complete unchanged-APK retry; its cause remains unknown. The independent rendered audit passed at phone 411dp, narrow 320dp, tablet 800dp, landscape and 200% font. Both immediate still-mode tap/swipe directions passed. Signature, development certificate, 16 KiB alignment and installed-byte equality passed. [Complete handoff and evidence](reports/concept-swipe-preview-20261011/release/HANDOFF.md).
 
 The swipe preview includes the current optional ChatGPT code, whose live generation failure remains open. It preserves prior demo artifacts and their acceptance status. No provider request was made for swipe QA. Physical phone touch feel, measured frame rate, spoken TalkBack and acoustic narration remain unverified. See [swipe test plan](docs/QA_PLAN.md) and [current local results](docs/QA_RESULTS.md).
 
@@ -69,7 +71,7 @@ Historical optional-feature QA: 52 unique device methods have passing evidence f
 
 ```sh
 ./scripts/build.sh :app:testDebugUnitTest :app:lintDebug
-ANDROID_SERIAL=emulator-5584 ./scripts/qa.sh device
+ANDROID_SERIAL=emulator-5596 ./scripts/qa.sh device
 ```
 
 Use a separate test emulator; device tests clear its app data. Select its actual serial. Tests include import/sections, full sentences, autoplay/pause/swipes, cards/covers, migration, storage, source/reading return, practice persistence/task fences, reset races, Keystore and provider protocol security. Fixture practice states are labeled in evidence. See [QA plan](docs/QA_PLAN.md).

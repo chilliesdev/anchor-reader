@@ -146,6 +146,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             onVoiceSettings = { openVoiceSettings(context) },
             onPreviousSentence = { pauseAnd { model.setSentence(state.currentProgress.sentenceIndex - 1) } },
             onNextSentence = { pauseAnd { model.nextSentence() } },
+            checkConcepts = state.questions.map { it.unitIndex }.toSet(),
           )
           SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(16.dp))
         }

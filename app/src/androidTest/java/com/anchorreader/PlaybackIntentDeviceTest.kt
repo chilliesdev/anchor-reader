@@ -1,7 +1,10 @@
 package com.anchorreader
 
 import androidx.activity.compose.setContent
-import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.Window
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -20,7 +23,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 /** Controlled voice readiness and completion; real offline speech has separate device tests. */
 @RunWith(AndroidJUnit4::class)
@@ -162,26 +166,60 @@ class PlaybackIntentDeviceTest {
         val frame = compose.onNodeWithTag("concept_video").fetchSemanticsNode().boundsInRoot
         val toggle = compose.onNodeWithContentDescription("Turn off still mode").fetchSemanticsNode().boundsInRoot.center
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val x = (frame.left + frame.width * .4f).toInt()
-        val start = (frame.top + frame.height * .75f).toInt()
-        val end = (frame.top + frame.height * .15f).toInt()
-        // UiAutomation executes an argument list, not a shell command line. A script keeps
-        // both real input commands in one native stream without a settle wait between them.
-        val script = File(requireNotNull(context.getExternalFilesDir("qa-swipe")), "native-toggle-swipe.sh")
-        requireNotNull(script.parentFile).mkdirs()
-        script.writeText("exec 2>&1\nset -e\ninput tap ${toggle.x.toInt()} ${toggle.y.toInt()}\ninput swipe $x $start $x $end 400\n")
-        val descriptor = automation.executeShellCommand("sh ${script.absolutePath}")
-        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use {
-            // Drive Compose's test clock while the native input stream runs. Reading the
-            // pipe first blocks virtual frames until after both gestures have finished.
-            try {
-                compose.waitUntil(10_000) { model.state.value.currentProgress.unitIndex == 1 }
-            } catch (failure: Throwable) {
-                throw AssertionError("Native input: still=${model.state.value.stillMode}, unit=${model.state.value.currentProgress.unitIndex}, frame=$frame, toggle=$toggle", failure)
+        val x = frame.left + frame.width * .4f
+        val start = frame.top + frame.height * .75f
+        val end = frame.top + frame.height * .15f
+        val lastMove = AtomicReference<Float?>()
+        val inputError = AtomicReference<Throwable?>()
+        var originalCallback: Window.Callback? = null
+        scenario.onActivity { activity ->
+            val original = activity.window.callback
+            originalCallback = original
+            activity.window.callback = object : Window.Callback by original {
+                override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                    if (event.actionMasked == MotionEvent.ACTION_MOVE) lastMove.set(event.y)
+                    return original.dispatchTouchEvent(event)
+                }
             }
-            assertEquals("Unexpected native command output", "", it.readBytes().toString(Charsets.UTF_8))
         }
-        script.delete()
+        fun inject(action: Int, down: Long, touchX: Float, touchY: Float) {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, touchX, touchY, 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { check(automation.injectInputEvent(event, false)) { "Native touch injection failed" } }
+            finally { event.recycle() }
+        }
+        // Queue native samples on real time. Shell input swipe can exhaust its duration
+        // while waiting for DOWN and then send UP with no MOVE at the requested endpoint.
+        val input = thread(name = "native-toggle-swipe") {
+            var held: Long? = null
+            try {
+                val tap = SystemClock.uptimeMillis()
+                held = tap
+                inject(MotionEvent.ACTION_DOWN, tap, toggle.x, toggle.y)
+                inject(MotionEvent.ACTION_UP, tap, toggle.x, toggle.y)
+                held = null
+                val down = SystemClock.uptimeMillis()
+                held = down
+                inject(MotionEvent.ACTION_DOWN, down, x, start)
+                for (step in 1..25) {
+                    Thread.sleep((down + step * 16 - SystemClock.uptimeMillis()).coerceAtLeast(0))
+                    inject(MotionEvent.ACTION_MOVE, down, x, start + (end - start) * step / 25)
+                }
+                inject(MotionEvent.ACTION_UP, down, x, end)
+                held = null
+            } catch (failure: Throwable) { inputError.set(failure) }
+            finally { held?.let { inject(MotionEvent.ACTION_CANCEL, it, x, end) } }
+        }
+        try {
+            // Keep virtual animation frames running while native input uses wall time.
+            compose.waitUntil(10_000) { inputError.get() != null || (!input.isAlive && model.state.value.currentProgress.unitIndex == 1) }
+            inputError.get()?.let { throw AssertionError("Native input injection", it) }
+            assertEquals("The native swipe must deliver its full MOVE path before UP", end, requireNotNull(lastMove.get()), 1f)
+        } finally {
+            input.interrupt()
+            input.join(1_000)
+            scenario.onActivity { it.window.callback = originalCallback }
+        }
         compose.waitForIdle()
         assertFalse(model.state.value.stillMode)
         assertEquals(0, model.state.value.currentProgress.sentenceIndex)

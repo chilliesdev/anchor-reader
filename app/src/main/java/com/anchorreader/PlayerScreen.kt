@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -83,12 +84,11 @@ fun PlayerScreen(
     onVoiceSettings: () -> Unit,
     onPreviousSentence: () -> Unit,
     onNextSentence: () -> Unit,
+    checkConcepts: Set<Int> = if (onCheck == null) emptySet() else setOf(progress.unitIndex),
 ) {
     val context = LocalContext.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val poster = remember { BitmapFactory.decodeResource(context.resources, R.raw.ocean_poster).asImageBitmap() }
-    val concept = book.units[progress.unitIndex]
-    var videoFailed by remember { mutableStateOf(false) }
     val pager = key(book.id) { rememberPagerState(initialPage = progress.unitIndex) { book.units.size } }
     val fling = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))
     val modelUnit by rememberUpdatedState(progress.unitIndex)
@@ -98,8 +98,6 @@ fun PlayerScreen(
     var touching by remember(book.id) { mutableStateOf(false) }
     var cancelledPage by remember(book.id) { mutableStateOf<Int?>(null) }
     val density = LocalDensity.current
-    var headerHeight by remember { mutableStateOf(48.dp) }
-    var footerHeight by remember { mutableStateOf(152.dp) }
     // Explicit navigation owns the model. Its pager synchronization must not autoplay again.
     LaunchedEffect(book.id, progress.unitIndex) {
         if (mirroredUnit != progress.unitIndex) {
@@ -152,12 +150,9 @@ fun PlayerScreen(
         }
     }
     Box(Modifier.fillMaxSize().background(Color(0xff09181e)).testTag("concept_video").then(touchState)
-        // One native scroll owner also accepts drags over the fixed controls. Sentence scroll
+        // One native scroll owner also accepts drags over each page's controls. Sentence scroll
         // consumes movement first; its remaining movement reaches this same pager state.
         .scrollable(pager, Orientation.Vertical, enabled = !synchronizing && cancelledPage == null, reverseDirection = true, flingBehavior = fling)) {
-        Image(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        if (!still && !videoFailed) BackgroundVideo(voice.playing, Modifier.fillMaxSize()) { videoFailed = true }
-        Box(Modifier.fillMaxSize().background(Color(0xff09181e).copy(alpha = .72f)))
         VerticalPager(
             state = pager,
             modifier = Modifier.fillMaxSize().testTag("concept_pager"),
@@ -167,70 +162,82 @@ fun PlayerScreen(
             key = { book.units[it].id },
         ) { page ->
             val active = page == progress.unitIndex
+            val interactive = active && pager.settledPage == page && pager.currentPageOffsetFraction == 0f && !pager.isScrollInProgress && !synchronizing && cancelledPage == null
+            val concept = book.units[page]
             val sentence = if (active) progress.sentenceIndex else 0
+            var videoFailed by remember { mutableStateOf(false) }
+            var headerHeight by remember { mutableStateOf(48.dp) }
+            var footerHeight by remember { mutableStateOf(152.dp) }
+            val controlSemantics = if (active) Modifier else Modifier.clearAndSetSemantics {}
             val scroll = rememberScrollState()
             LaunchedEffect(book.id, active, sentence) { scroll.scrollTo(0) }
-            Box(Modifier.fillMaxSize().testTag("concept_page_$page").semantics { if (!active) invisibleToUser() }
-                .safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(top = headerHeight, bottom = footerHeight, end = if (landscape) 0.dp else 56.dp),
-                contentAlignment = Alignment.CenterStart) {
-                Column(Modifier.fillMaxWidth().verticalScroll(scroll, enabled = scroll.maxValue > 0).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (book.isSample) ConceptArt(page, Modifier.fillMaxWidth().height(150.dp).clipToBounds())
-                    else Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = PlayerAccent, modifier = Modifier.size(52.dp))
-                    Text(book.units[page].title, modifier = Modifier.testTag("concept_title_$page"), color = Color(0xffd6e0e1), fontSize = 13.sp, lineHeight = 19.sp)
-                    Text(book.units[page].sentences[sentence], modifier = Modifier.testTag(if (active) "current_sentence" else "preview_sentence_$page"), color = Color(0xfff5f8f8), fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 38.sp)
-                }
-            }
-        }
-        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth().onSizeChanged { headerHeight = with(density) { it.height.toDp() } }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                PlayerIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to lesson outline", onBack)
-                Text("CONCEPT ${progress.unitIndex + 1} OF ${book.units.size}", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, color = Color(0xffd6e0e1), fontSize = 12.sp, letterSpacing = 1.sp)
-                Row {
-                    if (landscape) {
-                        PlayerIcon(Icons.Outlined.KeyboardArrowUp, "Previous concept", onPrevious, enabled = progress.unitIndex > 0)
-                        PlayerIcon(Icons.Outlined.KeyboardArrowDown, "Next concept", onNext)
-                        PlayerIcon(if (still) Icons.Outlined.MotionPhotosOff else Icons.Outlined.MotionPhotosOn, if (still) "Turn off still mode" else "Turn on still mode", onStill)
-                        PlayerIcon(Icons.Outlined.Image, "Open source", onSource)
+            Box(Modifier.fillMaxSize().testTag("concept_page_$page").semantics { if (!active) invisibleToUser() }) {
+                Image(poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().testTag("concept_background_$page"))
+                if (!still && !videoFailed) BackgroundVideo(active && voice.playing, Modifier.fillMaxSize().testTag("concept_background_video_$page")) { videoFailed = true }
+                Box(Modifier.fillMaxSize().background(Color(0xff09181e).copy(alpha = .72f)))
+                Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(top = headerHeight, bottom = footerHeight, end = if (landscape) 0.dp else 56.dp),
+                    contentAlignment = Alignment.CenterStart) {
+                    Column(Modifier.fillMaxWidth().verticalScroll(scroll, enabled = scroll.maxValue > 0).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (book.isSample) ConceptArt(page, Modifier.fillMaxWidth().height(150.dp).clipToBounds().testTag("concept_art_$page"))
+                        else Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = PlayerAccent, modifier = Modifier.size(52.dp).testTag("concept_art_$page"))
+                        Text(concept.title, modifier = Modifier.testTag("concept_title_$page"), color = Color(0xffd6e0e1), fontSize = 13.sp, lineHeight = 19.sp)
+                        Text(concept.sentences[sentence], modifier = Modifier.testTag(if (active) "current_sentence" else "preview_sentence_$page"), color = Color(0xfff5f8f8), fontFamily = FontFamily.Serif, fontSize = 30.sp, lineHeight = 38.sp)
                     }
-                    PlayerIcon(Icons.AutoMirrored.Outlined.Article, "Read full transcript", onTranscript)
                 }
-            }
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                val controlsScroll = rememberScrollState()
-                if (!landscape) Column(Modifier.verticalScroll(controlsScroll, enabled = controlsScroll.maxValue > 0), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlayerIcon(Icons.Outlined.KeyboardArrowUp, "Previous concept", onPrevious, enabled = progress.unitIndex > 0)
-                    PlayerIcon(Icons.Outlined.KeyboardArrowDown, "Next concept", onNext)
-                    PlayerIcon(if (still) Icons.Outlined.MotionPhotosOff else Icons.Outlined.MotionPhotosOn, if (still) "Turn off still mode" else "Turn on still mode", onStill)
-                    PlayerIcon(Icons.Outlined.Image, "Open source", onSource)
-                }
-            }
-            Column(Modifier.fillMaxWidth().onSizeChanged { footerHeight = with(density) { it.height.toDp() } }) {
-                if (!voice.ready) {
-                    Text(voice.status, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
-                    TextButton(onClick = onVoiceSettings, colors = ButtonDefaults.textButtonColors(contentColor = PlayerAccent)) { Text("Voice settings") }
-                }
-                if (videoFailed) Text("Video unavailable. Still mode is active.", color = Color.White, fontSize = 12.sp)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    PlayerIcon(Icons.Outlined.ChevronLeft, "Previous sentence", onPreviousSentence, enabled = progress.sentenceIndex > 0)
-                    PlayerIcon(Icons.Outlined.ChevronRight, "Next sentence", onNextSentence, enabled = progress.sentenceIndex + 1 < concept.sentences.size)
-                    if (onCheck != null) TextButton(onClick = onCheck, colors = ButtonDefaults.textButtonColors(contentColor = PlayerAccent)) { Text("Quick check") }
-                }
-                LinearProgressIndicator(
-                    progress = { (progress.sentenceIndex + 1).toFloat() / concept.sentences.size },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).height(4.dp).testTag("sentence_progress"),
-                    color = PlayerAccent, trackColor = Color.White.copy(alpha = .28f), drawStopIndicator = {},
-                )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FilledIconButton(onClick = onPlay, enabled = voice.ready || autoplayPending, modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = PlayerAccent, contentColor = Color(0xff093e47))) {
-                            Icon(if (voice.playing || autoplayPending) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, if (voice.playing || autoplayPending) "Pause narration" else "Play narration", modifier = Modifier.size(28.dp))
+                Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Row(Modifier.fillMaxWidth().testTag("concept_header_$page").onSizeChanged { headerHeight = with(density) { it.height.toDp() } }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        PlayerIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to lesson outline", onBack, interactive = interactive, modifier = controlSemantics)
+                        Text("CONCEPT ${page + 1} OF ${book.units.size}", modifier = Modifier.weight(1f), textAlign = TextAlign.Center, color = Color(0xffd6e0e1), fontSize = 12.sp, letterSpacing = 1.sp)
+                        Row {
+                            if (landscape) {
+                                PlayerIcon(Icons.Outlined.KeyboardArrowUp, "Previous concept", onPrevious, enabled = page > 0, interactive = interactive, modifier = controlSemantics)
+                                PlayerIcon(Icons.Outlined.KeyboardArrowDown, "Next concept", onNext, interactive = interactive, modifier = controlSemantics)
+                                PlayerIcon(if (still) Icons.Outlined.MotionPhotosOff else Icons.Outlined.MotionPhotosOn, if (still) "Turn off still mode" else "Turn on still mode", onStill, interactive = interactive, modifier = controlSemantics)
+                                PlayerIcon(Icons.Outlined.Image, "Open source", onSource, interactive = interactive, modifier = controlSemantics)
+                            }
+                            PlayerIcon(Icons.AutoMirrored.Outlined.Article, "Read full transcript", onTranscript, interactive = interactive, modifier = controlSemantics)
                         }
-                        Text("${progress.sentenceIndex + 1} / ${concept.sentences.size}", color = Color.White, modifier = Modifier.testTag("sentence_count").semantics { contentDescription = "Sentence ${progress.sentenceIndex + 1} of ${concept.sentences.size}" })
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        PlayerIcon(Icons.Outlined.Replay, "Replay narration", onReplay, enabled = voice.ready)
-                        TextButton(onClick = onSpeed, modifier = Modifier.widthIn(min = 56.dp).heightIn(min = 48.dp), colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("${voice.speed.toString().removeSuffix(".0")}×", fontSize = 12.sp) }
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        val controlsScroll = rememberScrollState()
+                        if (!landscape) Column(Modifier.testTag("concept_actions_$page").verticalScroll(controlsScroll, enabled = controlsScroll.maxValue > 0), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PlayerIcon(Icons.Outlined.KeyboardArrowUp, "Previous concept", onPrevious, enabled = page > 0, interactive = interactive, modifier = controlSemantics)
+                            PlayerIcon(Icons.Outlined.KeyboardArrowDown, "Next concept", onNext, interactive = interactive, modifier = controlSemantics)
+                            PlayerIcon(if (still) Icons.Outlined.MotionPhotosOff else Icons.Outlined.MotionPhotosOn, if (still) "Turn off still mode" else "Turn on still mode", onStill, interactive = interactive, modifier = controlSemantics)
+                            PlayerIcon(Icons.Outlined.Image, "Open source", onSource, interactive = interactive, modifier = controlSemantics)
+                        }
+                    }
+                    Column(Modifier.fillMaxWidth().testTag("concept_footer_$page").onSizeChanged { footerHeight = with(density) { it.height.toDp() } }) {
+                        if (!voice.ready) {
+                            Text(voice.status, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
+                            TextButton(onClick = { if (interactive) onVoiceSettings() }, enabled = interactive, modifier = controlSemantics, colors = ButtonDefaults.textButtonColors(contentColor = PlayerAccent, disabledContentColor = PlayerAccent)) { Text("Voice settings") }
+                        }
+                        if (videoFailed) Text("Video unavailable. Still mode is active.", color = Color.White, fontSize = 12.sp)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            PlayerIcon(Icons.Outlined.ChevronLeft, "Previous sentence", onPreviousSentence, enabled = sentence > 0, interactive = interactive, modifier = controlSemantics)
+                            PlayerIcon(Icons.Outlined.ChevronRight, "Next sentence", onNextSentence, enabled = sentence + 1 < concept.sentences.size, interactive = interactive, modifier = controlSemantics)
+                            if (page in checkConcepts) TextButton(onClick = { if (interactive) onCheck?.invoke() }, enabled = interactive && onCheck != null, modifier = controlSemantics, colors = ButtonDefaults.textButtonColors(contentColor = PlayerAccent, disabledContentColor = PlayerAccent)) { Text("Quick check") }
+                        }
+                        LinearProgressIndicator(
+                            progress = { (sentence + 1).toFloat() / concept.sentences.size },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp).height(4.dp).testTag(if (active) "sentence_progress" else "preview_sentence_progress_$page"),
+                            color = PlayerAccent, trackColor = Color.White.copy(alpha = .28f), drawStopIndicator = {},
+                        )
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                val playing = active && (voice.playing || autoplayPending)
+                                val playAvailable = voice.ready || autoplayPending
+                                FilledIconButton(onClick = { if (interactive && playAvailable) onPlay() }, enabled = interactive && playAvailable, modifier = Modifier.size(56.dp).then(controlSemantics), colors = IconButtonDefaults.filledIconButtonColors(containerColor = PlayerAccent, contentColor = Color(0xff093e47), disabledContainerColor = if (playAvailable) PlayerAccent else Color.Unspecified, disabledContentColor = if (playAvailable) Color(0xff093e47) else Color.Unspecified)) {
+                                    Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, if (playing) "Pause narration" else "Play narration", modifier = Modifier.size(28.dp))
+                                }
+                                Text("${sentence + 1} / ${concept.sentences.size}", color = Color.White, modifier = Modifier.testTag(if (active) "sentence_count" else "preview_sentence_count_$page").semantics { contentDescription = "Sentence ${sentence + 1} of ${concept.sentences.size}" })
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                PlayerIcon(Icons.Outlined.Replay, "Replay narration", onReplay, enabled = voice.ready, interactive = interactive, modifier = controlSemantics)
+                                TextButton(onClick = { if (interactive) onSpeed() }, enabled = interactive, modifier = Modifier.widthIn(min = 56.dp).heightIn(min = 48.dp).then(controlSemantics), colors = ButtonDefaults.textButtonColors(contentColor = Color.White, disabledContentColor = Color.White)) { Text("${voice.speed.toString().removeSuffix(".0")}×", fontSize = 12.sp) }
+                            }
+                        }
                     }
                 }
             }
@@ -239,8 +246,8 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PlayerIcon(icon: ImageVector, label: String, onClick: () -> Unit, enabled: Boolean = true) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(48.dp), colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White, disabledContentColor = Color.White.copy(alpha = .25f))) { Icon(icon, label, modifier = Modifier.size(24.dp)) }
+private fun PlayerIcon(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, interactive: Boolean = true) {
+    IconButton(onClick = { if (interactive && enabled) onClick() }, enabled = enabled && interactive, modifier = modifier.size(48.dp), colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White, disabledContentColor = if (enabled) Color.White else Color.White.copy(alpha = .25f))) { Icon(icon, label, modifier = Modifier.size(24.dp)) }
 }
 
 @Composable
