@@ -12,8 +12,10 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.Signature
 import java.security.interfaces.RSAPublicKey
+import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -60,6 +62,43 @@ class ProviderProtocolTest {
         LoopbackCallbackServer("state", 10).use { callback ->
             assertFailure(ProviderFailureKind.AUTH) { callback.await() }
         }
+    }
+
+    @Test fun returnPageAllowsOnlyItsStylesAndKeepsSuccessAndCancellationDataPrivate() {
+        val pages = mutableListOf<String>()
+        for (query in listOf("code=%3Cscript%3Eprivate-code%3C%2Fscript%3E", "error=access_denied&error_description=private-error")) {
+            LoopbackCallbackServer("private-state", 3_000).use { callback ->
+                val executor = Executors.newSingleThreadExecutor()
+                try {
+                    val result = executor.submit<AuthorizationCallback> { callback.await() }
+                    val connection = URL(callback.redirectUri + "?state=private-state&$query").openConnection() as HttpURLConnection
+                    try {
+                        assertEquals(200, connection.responseCode)
+                        val html = connection.inputStream.bufferedReader().use { it.readText() }
+                        pages += html
+                        val style = Regex("<style>([\\s\\S]*?)</style>").find(html)!!.groupValues[1]
+                        val hash = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(style.toByteArray(Charsets.UTF_8)))
+                        assertEquals("default-src 'none'; style-src 'sha256-$hash'; base-uri 'none'; frame-ancestors 'none'",
+                            connection.getHeaderField("Content-Security-Policy"))
+                        assertEquals("no-store", connection.getHeaderField("Cache-Control"))
+                        assertEquals("nosniff", connection.getHeaderField("X-Content-Type-Options"))
+                        assertTrue(html.contains("lang=\"en\""))
+                        assertTrue(html.contains("href=\"anchorreader://oauth-return\""))
+                        assertTrue(html.contains("The app will finish checking your sign-in."))
+                        assertFalse(html.contains("private-"))
+                        assertFalse(html.contains("<script"))
+                    } finally { connection.disconnect() }
+                    if (query.startsWith("code=")) {
+                        assertEquals("<script>private-code</script>", result.get(3, TimeUnit.SECONDS).code)
+                    } else {
+                        val failure = runCatching { result.get(3, TimeUnit.SECONDS) }.exceptionOrNull()?.cause
+                        assertTrue(failure is ProviderException)
+                        assertEquals(ProviderFailureKind.AUTH, (failure as ProviderException).kind)
+                    }
+                } finally { executor.shutdownNow() }
+            }
+        }
+        assertEquals(pages.first(), pages.last())
     }
 
     @Test fun rsaIdentityChecksIssuerAudienceNonceSignatureAndTime() {

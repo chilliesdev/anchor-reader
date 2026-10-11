@@ -2,7 +2,7 @@
 
 11 October 2026. Independent rendered audit **PASSED**. The entire concept page moves: background/video, header, artwork, sentence, actions, count, progress and playback footer. Adjacent pages meet without a blank strip. Each preview has its own concept content. Moving controls do not trigger actions. Android system bars remain outside the page.
 
-Still/video layouts passed at phone 411 dp, narrow 320 dp, tablet 800 dp and 200% font. Actual sample landscape, source/transcript controls and long sentence scroll passed. Up/down, reverse and cancel states were checked. Final production bytes match the audited debug APK.
+Still/video layouts passed at phone 411 dp, narrow 320 dp, tablet 800 dp and 200% font. Actual sample landscape, source/transcript controls and long sentence scroll passed. Up/down, reverse and cancel states were checked. The local swipe-preview bytes match the audited debug APK. This audit predates current-main integration; its player files remain unchanged.
 
 [Complete audit](../reports/full-page-swipe-preview-20261011/UI_AUDIT.md), [process/result evidence](../reports/full-page-swipe-preview-20261011/UI_EVIDENCE.md), [QA](QA_RESULTS.md), [release handoff](../reports/full-page-swipe-preview-20261011/release/HANDOFF.md).
 

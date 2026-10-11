@@ -4,8 +4,10 @@ import java.io.Closeable
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URLDecoder
 import java.net.SocketTimeoutException
+import java.net.URLDecoder
+import java.security.MessageDigest
+import java.util.Base64
 
 internal data class AuthorizationCallback(val code: String, val clientId: String?)
 
@@ -90,14 +92,112 @@ internal class LoopbackCallbackServer(private val expectedState: String, private
         val bytes = body.toByteArray(Charsets.UTF_8)
         val headers = "HTTP/1.1 $status ${if (status == 200) "OK" else "Error"}\r\n" +
             "Content-Type: text/html; charset=utf-8\r\nContent-Length: ${bytes.size}\r\n" +
-            "Cache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Content-Security-Policy: default-src 'none'; style-src 'sha256-$RETURN_STYLE_HASH'; base-uri 'none'; frame-ancestors 'none'\r\n" +
             "X-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n"
         socket.getOutputStream().write(headers.toByteArray(Charsets.US_ASCII) + bytes)
         socket.getOutputStream().flush()
     }
 
     companion object {
-        private const val RETURN_PAGE = "<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'><title>AnchorReader</title></head><body><h1>Return to AnchorReader</h1><p>The app will finish checking your sign-in.</p><p><a href='anchorreader://oauth-return'>Open AnchorReader</a></p></body></html>"
+        private val RETURN_STYLE = """
+            * { box-sizing: border-box; }
+            html { color-scheme: light; }
+            body {
+                margin: 0;
+                min-height: 100vh;
+                min-height: 100svh;
+                padding: clamp(20px, 8vh, 72px) 16px;
+                background: #F3F6F7;
+                color: #14262D;
+                font: 1rem/1.5625 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+            main {
+                width: 100%;
+                max-width: 28rem;
+                margin: 0 auto;
+                padding: 24px;
+                border: 1px solid #D4DFE1;
+                border-radius: 20px;
+                background: #FFFFFF;
+            }
+            .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; overflow-wrap: anywhere; }
+            .anchor {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 48px;
+                height: 48px;
+                border-radius: 12px;
+                background: #D7E9E9;
+                color: #0E5962;
+            }
+            .anchor svg { width: 32px; height: 32px; }
+            h1 {
+                margin: 24px 0 12px;
+                font: 400 1.875rem/1.1334 ui-serif, Georgia, serif;
+                overflow-wrap: anywhere;
+            }
+            p { margin: 0; color: #52666D; }
+            .open-app {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 48px;
+                margin-top: 24px;
+                padding: 12px 16px;
+                border-radius: 12px;
+                background: #0E5962;
+                color: #FFFFFF;
+                font-size: .875rem;
+                line-height: 1.4286;
+                font-weight: 600;
+                text-align: center;
+                text-decoration: none;
+            }
+            .open-app:hover, .open-app:active { background: #093E47; }
+            .open-app:focus-visible { outline: 3px solid #0E5962; outline-offset: 4px; }
+            .helper { margin-top: 12px; font-size: .875rem; line-height: 1.5; }
+            @media (max-width: 359px) {
+                main { padding: 20px; }
+                h1 { font-size: 1.75rem; line-height: 1.1786; }
+            }
+            @media (min-width: 600px) {
+                body { padding-top: clamp(48px, 16vh, 160px); }
+            }
+        """.trimIndent()
+        // Hash the exact style bytes sent below. No other inline styles or scripts are allowed.
+        private val RETURN_STYLE_HASH = Base64.getEncoder().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(RETURN_STYLE.toByteArray(Charsets.UTF_8)),
+        )
+        private val RETURN_PAGE = """
+            <!doctype html>
+            <html lang="en">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Return to AnchorReader</title>
+                <style>$RETURN_STYLE</style>
+            </head>
+            <body>
+                <main aria-labelledby="return-title">
+                    <div class="brand">
+                        <span class="anchor" aria-hidden="true">
+                            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="24" cy="5" r="3"/>
+                                <path d="M24 8V30M11 23H6M37 23H42M16 14C16 3 32 3 32 14M11 23V28C11 45 37 45 37 28V23"/>
+                            </svg>
+                        </span>
+                        <span>AnchorReader</span>
+                    </div>
+                    <h1 id="return-title">Return to AnchorReader</h1>
+                    <p>The app will finish checking your sign-in.</p>
+                    <a class="open-app" href="anchorreader://oauth-return">Open AnchorReader</a>
+                    <p class="helper">If the app does not open, switch back to AnchorReader.</p>
+                </main>
+            </body>
+            </html>
+        """.trimIndent()
     }
 }
 

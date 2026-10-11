@@ -161,7 +161,7 @@ class ProviderStreamDiagnosticTest {
             assertEquals(RESULT, parse((retained + event("response.completed", JSONObject().put("response", completed().apply { remove("output") }))).replace("\n", ending)))
             assertEquals(RESULT, parse(retained + terminal()))
         }
-        assertReason("output_empty", retained + terminal(JSONArray()))
+        assertEquals(RESULT, parse(retained + terminal(JSONArray())))
     }
 
     private fun parse(body: String) = readCompletedResponse(body.byteInputStream())

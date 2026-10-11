@@ -51,7 +51,8 @@ class ProviderTerminalCompatibilityTest {
     @Test fun presentTerminalOutputIsAuthoritativeAndInvalidOutputDoesNotFallBack() {
         val retained = finalized(0, message("{\"fixture_retained\":true}"))
         assertEquals(RESULT, parse(retained + terminal()))
-        for (output in listOf(JSONArray(), "wrong shape", JSONObject(), 1, JSONArray().put(JSONObject.NULL))) {
+        assertEquals("{\"fixture_retained\":true}", parse(retained + terminal(output = JSONArray())))
+        for (output in listOf("wrong shape", JSONObject(), 1, JSONArray().put(JSONObject.NULL))) {
             val response = completedResponse().put("output", output)
             assertRejected("present output $output", retained + event("response.completed", JSONObject().put("response", response)))
         }

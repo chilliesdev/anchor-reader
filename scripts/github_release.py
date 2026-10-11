@@ -188,8 +188,12 @@ def publish(directory):
             "First public release uses a new signing certificate. Existing debug/preview installs "
             "cannot update in place. Keep those installs and original source files until data migration "
             "is planned; uninstalling deletes local books and progress.\n\n"
-            "Optional live ChatGPT question generation remains unverified as working; "
-            "the latest measured live test failed. Reading and saved content work offline.\n\n"
+            "Bounded authentic ChatGPT acceptance on 11 October 2026 used a cap1 diagnostic APK "
+            "on an API37 emulator and saved six source-valid questions across two READY sections. "
+            "Source/answer checks, native correct/wrong feedback, offline practice and real process "
+            "restart persistence passed. The recovery patch passed 178 JVM tests and 62 isolated "
+            "native device tests. Other accounts/models, physical devices and provider billing remain "
+            "unverified; the upstream empty-output cause remains unknown.\n\n"
             f"## Commits\n\n{commit_notes(sha, base)}\n\n{generated}")
     payload = {"tag_name": tag, "target_commitish": sha, "name": f"AnchorReader {name}",
                "body": body, "draft": True, "prerelease": False, "make_latest": "false"}

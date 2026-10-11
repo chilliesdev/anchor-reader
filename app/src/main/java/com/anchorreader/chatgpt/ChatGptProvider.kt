@@ -30,6 +30,7 @@ class ChatGptProvider internal constructor(
     private val browserDispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val failureSink: ProviderFailureSink = AndroidProviderFailureSink,
     private val diagnosticResponsesCallLimit: Int = 0,
+    private val completionSink: ProviderCompletionSink = AndroidProviderCompletionSink,
 ) {
     constructor(context: Context) : this(KeystoreCredentialStore(context.applicationContext), PlatformChatGptHttp(),
         diagnosticResponsesCallLimit = BuildConfig.DIAGNOSTIC_RESPONSES_CALL_LIMIT)
@@ -227,6 +228,7 @@ class ChatGptProvider internal constructor(
                 var stage = ProviderRequestStage.SESSION_CHECK
                 var httpStatus: Int? = null
                 var streamMedia: ProviderStreamMedia? = null
+                var requestFormat: ProviderRequestFormat? = null
                 try {
                     checkRequest(request, accountId)
                     val current = usableRegistration(accountId)
@@ -259,6 +261,7 @@ class ChatGptProvider internal constructor(
                             .put("name", "section_questions").put("strict", true).put("schema", schema)))
                     val bodyBytes = body.toString().toByteArray(Charsets.UTF_8)
                     if (bodyBytes.size > 256 * 1024) throw ProviderException(ProviderFailureKind.INVALID_RESPONSE, "This section is too large. Use a smaller section.")
+                    requestFormat = ProviderRequestFormat.JSON_SCHEMA_STREAM_NO_STORE
                     stage = ProviderRequestStage.RESPONSES_OPEN
                     httpStatus = null
                     if (diagnosticResponsesCallLimit == 1 && !diagnosticResponseReserved.compareAndSet(false, true)) {
@@ -281,7 +284,7 @@ class ChatGptProvider internal constructor(
                         if (!mediaType.isNullOrEmpty() && !mediaType.matchesAsciiMediaType("text/event-stream")) {
                             throw ProviderException(ProviderFailureKind.INVALID_RESPONSE, "ChatGPT did not return a question stream.")
                         }
-                        val completed = readCompletedResponse(reply.input)
+                        val completed = readCompletedResponse(reply.input) { completion -> completionSink.record(completion) }
                         stage = ProviderRequestStage.RESPONSES_CLOSE
                         completed
                     }
@@ -293,7 +296,7 @@ class ChatGptProvider internal constructor(
                     throw error
                 } catch (error: Exception) {
                     // A diagnostic sink must never replace the existing safe failure or affect retries.
-                    ProviderFailureRecord.classify(stage, error, httpStatus, streamMedia)?.let { failure ->
+                    ProviderFailureRecord.classify(stage, error, httpStatus, streamMedia, requestFormat)?.let { failure ->
                         runCatching { failureSink.record(failure) }
                     }
                     throw safeFailure(error, ProviderFailureKind.NETWORK, "ChatGPT request stopped. Try again.")
