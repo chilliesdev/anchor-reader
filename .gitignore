@@ -1,0 +1,26 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.DS_Store
+.gradle/
+.tmp/
+local.properties
+**/build/
+*.jks
+*.keystore
+captures/
+artifacts/*.apk
+artifacts/*.aab
+artifacts/*.idsig
+
+# Local compiler state, credentials, and QA evidence
+.kotlin/
+.idea/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+reports/
+docs/evidence/
