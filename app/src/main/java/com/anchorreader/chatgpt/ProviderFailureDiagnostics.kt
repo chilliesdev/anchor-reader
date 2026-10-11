@@ -11,6 +11,10 @@ import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
 
 internal enum class ProviderRequestStage(val label: String) {
+    SIGNIN_STORE_LOAD("signin_store_load"), SIGNIN_LISTENER("signin_listener"), SIGNIN_BROWSER("signin_browser"),
+    SIGNIN_CALLBACK("signin_callback"), SIGNIN_REGISTRATION_SAVE("signin_registration_save"),
+    SIGNIN_TOKEN("signin_token"), SIGNIN_IDENTITY("signin_identity"), SIGNIN_TOKEN_FIELDS("signin_token_fields"),
+    SIGNIN_CONNECTION_SAVE("signin_connection_save"),
     SESSION_CHECK("session_check"), SESSION_REFRESH("session_refresh"),
     MODELS_OPEN("models_open"), MODELS_READ("models_read"), MODELS_PARSE("models_parse"),
     MODELS_CLOSE("models_close"), REQUEST_BUILD("request_build"),

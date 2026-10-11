@@ -1,5 +1,13 @@
 # Android QA results
 
+## Phone sign-in repair
+
+11 October 2026. Controlled sign-in QA passed on Android 15 with Chrome 124.0.6367.219. The reviewed phone files passed 192 JVM tests, zero failures/errors/skips; lint had zero errors and nine existing warnings. Native QA passed 11 regular cases: five MainActivity lifecycle cases, three error UI cases and three transport/security/storage cases. The deliberately killed process-loss preparation is excluded from that count.
+
+Those native bytes used base `25621ad2a1ce9115a5d1aa67987304663bd3753b` plus the six phone-fix files. Later integration adds main `1f0782abf404a3f3efb0410619eee995faa6ac29`; the six phone files remain identical. The integrated JVM suite passed 192 tests with zero failures/errors/skips; integrated lint had zero errors and 15 warnings. Debug APK, optimized unsigned release APK and unsigned AAB builds passed. Final integration review passed with matching auth, ViewModel and Manifest bytes. The exact integrated debug APK passed a separate production-default startup and Settings smoke on AOSP Android 15, disconnected and without provider/voice injection. The extra healthy-Chrome return repeat remained blocked by emulator/browser setup; its AOSP crash-resume diagnostic does not prove a healthy browser return. These checks do not increase the eleven earlier authentication passes. Signed public release/update checks remain separate gates. Actual OpenAI sign-in, physical Redmi acceptance and the precise phone failure cause remain unverified. [Behavior, fixtures, evidence and limits](PHONE_SIGNIN.md).
+
+## Previous full-page swipe preview
+
 11 October 2026. **PASSED for the local full-page swipe preview.** Independent rendered UI audit and source review passed. Final full native runner: **60/60 passed, zero failures/skips**, 299.808 s. Release build passed in 2m58s: debug APK, 141 JVM tests across 13 suites, lint, optimized release APK and unsigned AAB. Zero JVM failures/errors/skips. Lint: zero errors/fatals, 15 existing warnings.
 
 These results and the linked local APK cover the reviewed swipe preview before current-main generation-recovery/OAuth integration. Combined-source review and QA are separate.
