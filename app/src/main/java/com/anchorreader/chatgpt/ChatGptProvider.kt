@@ -57,7 +57,8 @@ class ChatGptProvider internal constructor(
             try {
                 data = store.load()
                 publish()
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                recordSignInFailure(ProviderRequestStage.SIGNIN_STORE_LOAD, error)
                 storageNeedsReset = true
                 val retained = runCatching { store.recoveryData() }.getOrNull()
                 if (retained != null) {
@@ -83,7 +84,8 @@ class ChatGptProvider internal constructor(
         val state = randomValue()
         val nonce = randomValue()
         val codeVerifier = randomValue()
-        val listener = try { LoopbackCallbackServer(state) } catch (_: Exception) {
+        val listener = try { LoopbackCallbackServer(state) } catch (error: Exception) {
+            recordSignInFailure(ProviderRequestStage.SIGNIN_LISTENER, error)
             stateLock.withLock { publish(signingIn = false, message = "The sign-in listener could not start. Try again.") }
             throw ProviderException(ProviderFailureKind.NETWORK, "The sign-in listener could not start. Try again.")
         }
@@ -91,6 +93,7 @@ class ChatGptProvider internal constructor(
         var exchangedRefresh: String? = null
         var exchangedClient: String? = null
         var committed = false
+        var stage = ProviderRequestStage.SIGNIN_BROWSER
         try {
             val fields = linkedMapOf(
                 "client_id" to (returning?.clientId ?: "dynamic_agent_client"),
@@ -103,6 +106,7 @@ class ChatGptProvider internal constructor(
             if (returning == null) fields["agent_name_hint"] = "AnchorReader"
             val authorizeUrl = "${endpoints.authorize}?${formBody(fields).toString(Charsets.UTF_8)}"
             withContext(browserDispatcher) { openBrowser(authorizeUrl) }
+            stage = ProviderRequestStage.SIGNIN_CALLBACK
             val callback = listener.await()
             val clientId = returning?.clientId ?: callback.clientId
                 ?: throw ProviderException(ProviderFailureKind.AUTH, "ChatGPT did not return a client registration.")
@@ -112,18 +116,23 @@ class ChatGptProvider internal constructor(
             stateLock.withLock {
                 // Persist the issued registration before exchange; canceled exchanges can reuse it.
                 if (returning == null && data.registrations.none { it.clientId == clientId }) {
+                    stage = ProviderRequestStage.SIGNIN_REGISTRATION_SAVE
                     persist(data.replace(Registration(clientId), select = data.selectedClientId == null))
                 }
                 checkAuthAttempt(attempt)
             }
+            stage = ProviderRequestStage.SIGNIN_TOKEN
             val tokens = tokenRequest(linkedMapOf(
                 "grant_type" to "authorization_code", "client_id" to clientId, "code" to callback.code,
                 "code_verifier" to codeVerifier, "redirect_uri" to listener.redirectUri, "resource" to endpoints.resource,
             ))
+            stage = ProviderRequestStage.SIGNIN_TOKEN_FIELDS
             exchangedRefresh = tokens.nullableString("refresh_token")
             exchangedClient = clientId
             val idToken = tokens.getString("id_token")
+            stage = ProviderRequestStage.SIGNIN_IDENTITY
             val identity = verifier.verify(idToken, clientId, nonce, returning?.subject)
+            stage = ProviderRequestStage.SIGNIN_TOKEN_FIELDS
             val next = registrationFromTokens(tokens,
                 Registration(clientId, identity.subject, endpoints.issuer, identity.email, nonce = nonce), idToken,
                 requireRefresh = true)
@@ -131,6 +140,7 @@ class ChatGptProvider internal constructor(
                 checkAuthAttempt(attempt)
                 sessionVersion++
                 requestVersion.incrementAndGet()
+                stage = ProviderRequestStage.SIGNIN_CONNECTION_SAVE
                 persist(data.replace(next, select = true))
                 committed = true
                 publish(signingIn = false)
@@ -139,7 +149,18 @@ class ChatGptProvider internal constructor(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            val failure = safeFailure(error, ProviderFailureKind.AUTH, "ChatGPT sign-in did not finish. Connect again.")
+            recordSignInFailure(stage, error)
+            val failure = safeFailure(error,
+                if (stage == ProviderRequestStage.SIGNIN_TOKEN) ProviderFailureKind.NETWORK else ProviderFailureKind.AUTH,
+                when (stage) {
+                    ProviderRequestStage.SIGNIN_BROWSER -> "The sign-in browser could not open. Try again."
+                    ProviderRequestStage.SIGNIN_REGISTRATION_SAVE, ProviderRequestStage.SIGNIN_CONNECTION_SAVE ->
+                        "ChatGPT connection could not be saved. Connect again."
+                    ProviderRequestStage.SIGNIN_TOKEN -> "ChatGPT connection could not be checked. Check your network, then connect again."
+                    ProviderRequestStage.SIGNIN_IDENTITY, ProviderRequestStage.SIGNIN_TOKEN_FIELDS ->
+                        "ChatGPT sign-in could not be verified. Connect again."
+                    else -> "ChatGPT sign-in did not finish. Connect again."
+                })
             stateLock.withLock { if (attempt == authVersion.get()) publish(signingIn = false, message = failure.message) }
             throw failure
         } finally {
@@ -153,6 +174,12 @@ class ChatGptProvider internal constructor(
                 }
                 stateLock.withLock { if (attempt == authVersion.get()) publish(signingIn = false, message = mutableState.value.message) }
             }
+        }
+    }
+
+    private fun recordSignInFailure(stage: ProviderRequestStage, error: Exception) {
+        ProviderFailureRecord.classify(stage, error, null)?.let { failure ->
+            runCatching { failureSink.record(failure) }
         }
     }
 

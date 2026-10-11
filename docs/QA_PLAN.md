@@ -76,6 +76,7 @@ Screenshots are written to `.tmp/qa/`. Preserve reviewed evidence in the final Q
 - Verify total storage includes practice after answer/progress/import/delete/reset. Deliberately release a queued old answer after reset and confirm it does not return.
 - Verify real Android Keystore encrypted storage, tamper/key-loss recovery and clear confirmation before resetting connection. Fake token fixtures must use isolated files/key aliases and clean them.
 - Verify actual loopback callback path/method/host/state/duplicate/timeout, PKCE, signed-token issuer/audience/nonce/time/signature, refresh rotation and logout races, platform TLS/hostname rejection, redirects and bounded completed SSE. Test credentials/endpoints remain internal to tests.
+- Verify empty, reset and partial browser sockets do not consume the callback attempt. Bound each read and the full attempt. Verify a valid callback survives a failed response write; rejected state remains rejected. On Android 15, use actual MainActivity and Chrome: return while token exchange is held, recreate/rotate the activity, cancel before a late grant and recover after verified process loss. Check ViewModel/job identity and protected storage, not only the app PID. See [sign-in scope](PHONE_SIGNIN.md).
 
 ## Optional PDF practice: manual and live checks
 

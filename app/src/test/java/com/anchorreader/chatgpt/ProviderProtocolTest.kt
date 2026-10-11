@@ -84,7 +84,7 @@ class ProviderProtocolTest {
                         assertEquals("nosniff", connection.getHeaderField("X-Content-Type-Options"))
                         assertTrue(html.contains("lang=\"en\""))
                         assertTrue(html.contains("href=\"anchorreader://oauth-return\""))
-                        assertTrue(html.contains("The app will finish checking your sign-in."))
+                        assertTrue(html.contains(if (query.startsWith("code=")) "check if the connection was saved" else "Sign-in did not finish"))
                         assertFalse(html.contains("private-"))
                         assertFalse(html.contains("<script"))
                     } finally { connection.disconnect() }
@@ -98,7 +98,106 @@ class ProviderProtocolTest {
                 } finally { executor.shutdownNow() }
             }
         }
-        assertEquals(pages.first(), pages.last())
+        assertNotEquals(pages.first(), pages.last())
+    }
+
+    @Test fun deniedCallbackNeverExchangesTokensAndRecordsOnlyItsSafeStage() = runBlocking {
+        ProtocolFixture().use { fixture ->
+            val records = mutableListOf<ProviderFailureRecord>()
+            val store = MemoryStore()
+            val provider = fixture.provider(store, failureSink = ProviderFailureSink { records += it })
+            val failure = runCatching {
+                provider.signIn { url ->
+                    val fields = parseQuery(URI(url).rawQuery)
+                    Thread { status(fields.getValue("redirect_uri") + "?state=" + fields.getValue("state") +
+                        "&error=access_denied&error_description=FAKE_SECRET_PROVIDER_TEXT") }.start()
+                }
+            }.exceptionOrNull()
+            assertEquals("ChatGPT sign-in was canceled or declined. Connect again when ready.", failure!!.message)
+            assertFalse(provider.state.value.connected)
+            assertFalse(provider.state.value.signingIn)
+            assertTrue(fixture.tokenForms.isEmpty())
+            assertTrue(store.value.registrations.isEmpty())
+            assertEquals("stage=signin_callback class=ProviderException code=provider_failure failure_kind=auth", records.single().line())
+            assertFalse(records.single().line().contains("FAKE_SECRET"))
+        }
+    }
+
+    @Test fun tokenNetworkAndTokenFieldFailuresHaveSafeDistinctStagesAndDoNotConnect() = runBlocking {
+        for (networkFailure in listOf(true, false)) {
+            ProtocolFixture().use { fixture ->
+                val records = mutableListOf<ProviderFailureRecord>()
+                val store = MemoryStore()
+                val transport = object : ChatGptHttp {
+                    override fun open(url: String, method: String, headers: Map<String, String>, body: ByteArray?): HttpReply {
+                        if (url != fixture.endpoints.token) return fixture.http.open(url, method, headers, body)
+                        if (networkFailure) throw IOException("FAKE_SECRET_TOKEN_CODE_URL")
+                        return HttpReply(200, emptyMap(), "{\"refresh_token\":\"FAKE_SECRET_REFRESH\"}".byteInputStream()) {}
+                    }
+                    override fun cancelAll() = Unit
+                }
+                val provider = fixture.provider(store, transport, ProviderFailureSink { records += it })
+                val failure = runCatching { connect(provider, fixture) }.exceptionOrNull() as ProviderException
+                assertEquals(if (networkFailure) ProviderFailureKind.NETWORK else ProviderFailureKind.AUTH, failure.kind)
+                assertEquals(if (networkFailure) "ChatGPT connection could not be checked. Check your network, then connect again."
+                    else "ChatGPT sign-in could not be verified. Connect again.", failure.message)
+                assertFalse(provider.state.value.connected)
+                assertNull(store.value.selected()!!.accessToken)
+                assertEquals(if (networkFailure) ProviderRequestStage.SIGNIN_TOKEN else ProviderRequestStage.SIGNIN_TOKEN_FIELDS,
+                    records.single().stage)
+                assertFalse(records.single().line().contains("FAKE_SECRET"))
+            }
+        }
+    }
+
+    @Test fun registrationAndConnectionSaveFailuresHaveSafeDistinctStagesAndDoNotConnect() = runBlocking {
+        for (failFirstSave in listOf(true, false)) {
+            ProtocolFixture().use { fixture ->
+                val records = mutableListOf<ProviderFailureRecord>()
+                val store = object : CredentialStore {
+                    var value = ConnectionData("urn:uuid:save-failure-fixture")
+                    override fun load() = value
+                    override fun save(data: ConnectionData) {
+                        if (failFirstSave || data.selected()?.accessToken != null) throw IOException("FAKE_SECRET_STORE_PATH")
+                        value = data
+                    }
+                }
+                val provider = fixture.provider(store, failureSink = ProviderFailureSink { records += it })
+                val failure = runCatching { connect(provider, fixture) }.exceptionOrNull()
+                assertEquals("ChatGPT connection could not be saved. Connect again.", failure!!.message)
+                assertFalse(provider.state.value.connected)
+                assertFalse(provider.state.value.signingIn)
+                assertNull(store.value.selected()?.accessToken)
+                assertEquals(if (failFirstSave) ProviderRequestStage.SIGNIN_REGISTRATION_SAVE else ProviderRequestStage.SIGNIN_CONNECTION_SAVE,
+                    records.single().stage)
+                assertFalse(records.single().line().contains("FAKE_SECRET"))
+                assertEquals(if (failFirstSave) 0 else 1, fixture.tokenForms.size)
+            }
+        }
+    }
+
+    @Test fun invalidSignedIdentityNeverCommitsAndRecordsOnlyTheIdentityStage() = runBlocking {
+        ProtocolFixture().use { fixture ->
+            val records = mutableListOf<ProviderFailureRecord>()
+            val store = MemoryStore()
+            val transport = object : ChatGptHttp {
+                override fun open(url: String, method: String, headers: Map<String, String>, body: ByteArray?): HttpReply {
+                    if (url != fixture.endpoints.token) return fixture.http.open(url, method, headers, body)
+                    val token = JSONObject().put("access_token", "FAKE_SECRET_ACCESS").put("refresh_token", "FAKE_SECRET_REFRESH")
+                        .put("token_type", "Bearer").put("expires_in", 3600).put("scope", PLAN_SCOPES)
+                        .put("id_token", fixture.sign(fixture.claims("client-1", "FAKE_SECRET_WRONG_NONCE")))
+                    return HttpReply(200, emptyMap(), token.toString().byteInputStream()) {}
+                }
+                override fun cancelAll() = Unit
+            }
+            val provider = fixture.provider(store, transport, ProviderFailureSink { records += it })
+            val failure = runCatching { connect(provider, fixture) }.exceptionOrNull()
+            assertTrue(failure is ProviderException)
+            assertFalse(provider.state.value.connected)
+            assertNull(store.value.selected()!!.accessToken)
+            assertEquals(ProviderRequestStage.SIGNIN_IDENTITY, records.single().stage)
+            assertFalse(records.single().line().contains("FAKE_SECRET"))
+        }
     }
 
     @Test fun rsaIdentityChecksIssuerAudienceNonceSignatureAndTime() {
