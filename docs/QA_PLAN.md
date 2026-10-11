@@ -9,7 +9,7 @@ JDK 17 or 21, Android SDK 35, and an Android emulator or approved test phone are
 ```sh
 export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'
 export ANDROID_HOME="$HOME/Library/Android/sdk"
-export ANDROID_SERIAL=emulator-5594
+export ANDROID_SERIAL=emulator-5584
 scripts/qa.sh all
 ```
 
@@ -22,7 +22,8 @@ Results: `app/build/reports/tests/testDebugUnitTest/`, `app/build/reports/lint-r
 - Section detection: titled text, PDF headings/bookmarks and font contrast; one topic per concept across paragraphs/pages. Headingless source uses `Full document`. Wrapped names, page continuation and unmatched bookmarks preserve source text.
 - Sentence identity: each complete sentence is one progress step, including abbreviations, numbered prefixes and long sentences. Bounded speech buffers do not add progress steps.
 - Player: open sample/text/PDF or Continue/outline to autoplay after voice readiness. A pending start can be cancelled. Pause, dialogs, settings, background/return and stale speech callbacks cannot restart or move a new concept.
-- Swipe up/down: open adjacent concept at sentence one and autoplay. Check video, sentence scroll edge and lower controls; preserve long text scroll and safe first/last boundaries. Natural completion pauses at the final sentence; sample Quick check remains explicit.
+- Swipe up/down: full-height pages follow the finger with no gap. A held drag shows the next concept and keeps control bounds fixed; progress and speech stay on the current concept until settlement. A settled adjacent page starts at sentence one and requests autoplay once. Check short/reversed/horizontal gestures, strong ACTION_CANCEL, one-page fast flings, video, side/lower controls, long sentence scroll and edge transfer. First/last bounds do not wrap or open a quiz/finish screen. Natural completion pauses at the final sentence; sample Quick check remains explicit.
+- Swipe state: Next/Previous, outline, external progress and book changes keep the pager in step. Continue movement after external navigation during a held drag, then check the next swipe. Old narration completion cannot advance a newly selected concept. Tap still mode then swipe immediately, with no timing gap, in both still-mode directions from a paused/completed sample concept.
 - Concept progress: for concept A with three sentences and B with five, count/bar progress stays inside each concept and resets from `3 / 3` to `1 / 5`.
 - Shared cards: sample/text/PDF use common title/body fonts and layout; author stays visible; Start/Continue has Play icon; Details is a named 48 dp icon control.
 - Cover: pixel/aspect/white-background checks prove actual PDF page one; image-only cover with digital body is accepted. Missing/corrupt cover has a safe fallback.
@@ -49,6 +50,7 @@ Imported text remains source text. Heading/bookmark evidence does not prove sema
 7. Force-stop then reopen. Check resume location, saved books, still-mode preference, and answer record. Clear progress in settings; books must remain. Delete one book; other books must remain.
 8. Import a PDF with a distinctive first-page cover and two sections on later pages. One section must cross a page boundary. Confirm the cover, source pages, section titles and full sentence order. In the library compare its card with the sample and a text book. Capture the native picker, final card, autoplay/count and both swipe directions.
 9. At 411 dp, 320 dp, about 800 dp tablet, landscape and 200% font scale, check shared cards, complete sentence scroll and control reach. Restore device size, density, font scale and rotation after checks. Keep this evidence separate from previous release images.
+10. On a physical phone, compare slow drags and fast flings with the requested TikTok/Reels behavior. Check finger tracking, adjacent preview, release snap, one-page bounds, cancelled gestures and repeated strokes. Measure frame rate or jank before making a performance claim. Emulator input and screenshots do not prove physical touch feel.
 
 Capture the visible screen:
 
