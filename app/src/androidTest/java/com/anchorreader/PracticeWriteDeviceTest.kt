@@ -70,7 +70,7 @@ class PracticeWriteDeviceTest {
             model = ReaderViewModel(application, ChatGptProvider(application), dispatcher)
             store.put("practice-write", model)
         }
-        await { !model.state.value.loading }
+        await("initial_load") { !model.state.value.loading }
     }
 
     @After
@@ -79,7 +79,7 @@ class PracticeWriteDeviceTest {
     @Test
     fun queuedAnswerCannotReturnAfterResetAndLaterDeliberateAnswerStillSaves() {
         answer(question.correctIndex)
-        await { model.state.value.practice[book.id]?.answer(question) == Outcome.CORRECT }
+        await("first_answer_saved") { model.state.value.practice[book.id]?.answer(question) == Outcome.CORRECT }
         assertEquals(Outcome.CORRECT, reopened().answer(question))
 
         dispatcher.hold = true
@@ -88,7 +88,7 @@ class PracticeWriteDeviceTest {
         val oldAnswer = requireNotNull(dispatcher.heldJob)
         assertFalse(oldAnswer.isCompleted)
         main { model.openSettings(); model.resetProgress() }
-        await { !model.state.value.loading && model.state.value.practice[book.id]?.answers?.isEmpty() == true }
+        await("queued_answer_reset") { !model.state.value.loading && model.state.value.practice[book.id]?.answers?.isEmpty() == true }
         assertTrue(reopened().answers.isEmpty())
         assertFalse(oldAnswer.isCompleted)
 
@@ -99,7 +99,7 @@ class PracticeWriteDeviceTest {
         assertEquals(listOf(question), reopened().questions)
 
         answer(1)
-        await { model.state.value.practice[book.id]?.answer(question) == Outcome.WRONG }
+        await("later_answer_saved") { model.state.value.practice[book.id]?.answer(question) == Outcome.WRONG }
         assertEquals(Outcome.WRONG, reopened().answer(question))
         assertEquals(question.version, reopened().questions.single().version)
         assertEquals(0, dispatcher.queuedCount)
@@ -109,24 +109,30 @@ class PracticeWriteDeviceTest {
     fun storageTotalIncludesPracticeAfterProgressImportDeleteAndReset() {
         assertTotal()
         answer(question.correctIndex)
-        await { model.state.value.practice[book.id]?.answer(question) == Outcome.CORRECT }
-        awaitTotal()
+        await("storage_answer_saved") { model.state.value.practice[book.id]?.answer(question) == Outcome.CORRECT }
+        awaitTotal("answer_byte_total")
         main { model.start(book); model.setSentence(1) }
-        await { books.loadProgress(book.id).sentenceIndex == 1 }
-        awaitTotal()
+        val progressFile = File(context.filesDir, "progress/${book.id}.json")
+        // AtomicFile.openRead can remove a writer's .new. Observe the committed base
+        // without invoking another repository's recovery while the model is writing.
+        await("progress_committed") {
+            runCatching { JSONObject(progressFile.readText()).getInt("sentenceIndex") == 1 }.getOrDefault(false)
+        }
+        assertEquals(1, books.loadProgress(book.id).sentenceIndex)
+        awaitTotal("progress_byte_total")
 
         val input = sourceFile()
         main { model.importPdf(Uri.fromFile(input), "Second saved PDF", "QA") }
-        await { !model.state.value.loading && model.state.value.books.any { it.title == "Second saved PDF" } }
+        await("second_import_saved") { !model.state.value.loading && model.state.value.books.any { it.title == "Second saved PDF" } }
         input.delete()
         assertTotal()
         val addedId = model.state.value.activeId
         main { model.deleteBook() }
-        await { !model.state.value.loading && model.state.value.books.none { it.id == addedId } }
+        await("second_book_deleted") { !model.state.value.loading && model.state.value.books.none { it.id == addedId } }
         assertTotal()
 
         main { model.openSettings(); model.resetProgress() }
-        await { !model.state.value.loading && model.state.value.practice[book.id]?.answers?.isEmpty() == true }
+        await("storage_answers_reset") { !model.state.value.loading && model.state.value.practice[book.id]?.answers?.isEmpty() == true }
         assertTrue(reopened().answers.isEmpty())
         assertTotal()
     }
@@ -150,9 +156,9 @@ class PracticeWriteDeviceTest {
         assertTrue(practice.storedBytes() > 0)
         main { assertEquals(total(), model.state.value.storedBytes) }
     }
-    private fun awaitTotal() { await { model.state.value.storedBytes == total() }; assertTotal() }
+    private fun awaitTotal(step: String) { await(step) { model.state.value.storedBytes == total() }; assertTotal() }
     private fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
-    private fun await(condition: () -> Boolean) {
+    private fun await(step: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + 10_000_000_000L
         while (System.nanoTime() < deadline) {
             var ready = false
@@ -160,7 +166,11 @@ class PracticeWriteDeviceTest {
             if (ready) return
             Thread.sleep(10)
         }
-        main { assertTrue("Timed out waiting for a saved state.", condition()) }
+        main {
+            val state = model.state.value
+            assertTrue("Saved state timeout: step=$step loading=${state.loading} error=${state.error != null} " +
+                "books=${state.books.size.coerceAtMost(1000)} bytes_match=${state.storedBytes == total()}", condition())
+        }
     }
 
     private class QueuedAnswerDispatcher : CoroutineDispatcher() {

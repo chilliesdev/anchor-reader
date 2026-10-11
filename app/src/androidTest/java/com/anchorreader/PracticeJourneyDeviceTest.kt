@@ -79,7 +79,7 @@ class PracticeJourneyDeviceTest {
         val first = model.state.value.questions.first()
         answer(first.correctIndex)
         compose.onNodeWithText("View source · page ${first.sourcePage}").performScrollTo().performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Source PDF page ${first.sourcePage}").fetchSemanticsNodes().isNotEmpty() }
+        waitForSourcePage(first.sourcePage)
         compose.onNodeWithContentDescription("Source PDF page ${first.sourcePage}").assertExists()
         compose.onNodeWithText("Back to lesson").performClick()
         click("Next question")
@@ -143,7 +143,7 @@ class PracticeJourneyDeviceTest {
         click("Skip")
         val question = model.state.value.questions.first()
         click("View source · page ${question.sourcePage}")
-        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Source PDF page ${question.sourcePage}").fetchSemanticsNodes().isNotEmpty() }
+        waitForSourcePage(question.sourcePage)
         compose.onNodeWithText("Back to lesson").performClick()
         click("Continue reading")
         waitForScreen(Screen.OVERVIEW)
@@ -200,6 +200,23 @@ class PracticeJourneyDeviceTest {
     private fun waitForScreen(screen: Screen) {
         compose.waitUntil(10_000) { model.state.value.screen == screen }
         compose.waitForIdle()
+    }
+
+    private fun waitForSourcePage(page: Int?) {
+        try {
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithContentDescription("Source PDF page $page").fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (failure: ComposeTimeoutException) {
+            val dialog = runCatching { compose.onAllNodesWithContentDescription("Close source").fetchSemanticsNodes().isNotEmpty() }.getOrNull()
+            val image = runCatching { compose.onAllNodesWithContentDescription("Source PDF page $page").fetchSemanticsNodes().isNotEmpty() }.getOrNull()
+            val renderError = runCatching {
+                compose.onAllNodesWithText("Could not display this source page. Full text remains available.").fetchSemanticsNodes().isNotEmpty()
+            }.getOrNull()
+            val pdf = book.pdfPath?.let(::File)
+            throw AssertionError("PDF source timeout: page=$page dialog=$dialog image=$image render_error=$renderError " +
+                "pdf_exists=${pdf?.isFile == true} pdf_nonempty=${pdf?.length()?.let { it > 0 } == true} screen=${model.state.value.screen}", failure)
+        }
     }
 
     private fun fixtureQuestions(): List<RecallQuestion> {
