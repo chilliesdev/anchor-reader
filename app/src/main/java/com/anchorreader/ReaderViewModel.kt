@@ -189,6 +189,11 @@ class ReaderViewModel internal constructor(application: Application, private val
 
     fun nextConcept() = advanceUnit()
 
+    fun selectConcept(index: Int) {
+        val current = state.value
+        if (current.screen == Screen.PLAYER && index in current.book.units.indices && index != current.currentProgress.unitIndex) start(current.book, index)
+    }
+
     fun openRecall() {
         if (!state.value.book.isSample) { openPractice(state.value.currentProgress.unitIndex); return }
         val question = state.value.questions.indexOfFirst { it.unitIndex == state.value.currentProgress.unitIndex }
