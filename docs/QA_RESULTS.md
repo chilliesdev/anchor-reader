@@ -1,5 +1,15 @@
 # Android QA results
 
+## Open Design update
+
+12 October 2026. **PASSED for issue #8 and all 17 children #9–#25.** Reviewed base `538ef6783b701752d5389f0c1feae5c8890e36ec` plus final design changes. Debug APK SHA-256 `09392c3d0a47f1d51e079f867f8741d57c53a0aed66c63c49e517c9f728d2ada`. Native build/lint passed; 194 JVM tests passed with zero failures/errors/skips. Lint has zero errors and 15 existing warnings.
+
+All 82 unique native cases have passing evidence across two runs. The initial full run passed 79, failed three and skipped zero in 379.917 seconds. Chrome first-run setup blocked the three synthetic callback cases. After signed-out browser setup, those identical cases passed 3/3, zero skips, in 16.321 seconds. No app change or live account/provider request was made. Initial failures and per-case run identities remain in local evidence; this is not one clean 82/82 runner result.
+
+Independent rendered audit and Standards/Spec review passed. Actual sample and imported workflows verified correct/wrong/skipped checks, final Complete, scoped results, source/full-text actions, Review and byte-identical saved records after a real process restart. Reading progress remains actual: sample 3/4 concepts; imported PDF 1/2 despite completed checks. The 3,000-concept overview regression passed lazy composition, final selection and saved progress. Real offline narration and video/still motion passed without skips.
+
+Owned API37 arm64 emulator: phone 411dp; independent UI matrix also covers 320dp, 800dp tablet, landscape, long content and 200% text. Settled process/error images were captured and viewed. Three early transition frames are excluded from claimed-state proof. No physical-device, spoken TalkBack, acoustic output or new live-provider acceptance is claimed. CI and signed publication have separate exact-commit gates. See [screen behavior and reproduction](OPEN_DESIGN.md).
+
 ## Phone sign-in repair
 
 11 October 2026. Controlled sign-in QA passed on Android 15 with Chrome 124.0.6367.219. The reviewed phone files passed 192 JVM tests, zero failures/errors/skips; lint had zero errors and nine existing warnings. Native QA passed 11 regular cases: five MainActivity lifecycle cases, three error UI cases and three transport/security/storage cases. The deliberately killed process-loss preparation is excluded from that count.

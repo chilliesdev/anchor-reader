@@ -2,6 +2,12 @@
 
 A native Android reader based on the supplied original design. Kotlin and Jetpack Compose implement the screens. Books, progress, source files, preferences and saved practice stay on the device. Optional question generation sends selected section text to OpenAI through the user's ChatGPT connection.
 
+## Open Design update
+
+12 October 2026. All 17 changes from [issue #8](https://github.com/chilliesdev/anchor-reader/issues/8) and children #9–#25 are implemented. Library cards are compact. Overview groups reading actions and concept states. The Player has a lower-right icon rail, sentence controls beside Play, a bottom title and visible video. Quick check uses the concept title; final Complete opens grouped results without marking unread concepts visited. Narrow screens and large text keep full labels and summary words readable. See [screen behavior and checks](docs/OPEN_DESIGN.md).
+
+Independent rendered UI audit and code review passed. Current local build/lint and 194 JVM tests passed, with zero test failures/errors/skips and zero lint errors. All 82 native cases have passing evidence: the full run passed 79 and failed three Chrome first-run setup cases; those same three passed after signed-out browser setup. This was two runs, not one clean 82-test run. No live provider request was made. Physical phones, spoken TalkBack and acoustic output remain unverified. GitHub CI and signed publication are checked separately for the delivered commit.
+
 ## Read and practise
 
 - Create a book from text or import a digital PDF through the Android file picker.

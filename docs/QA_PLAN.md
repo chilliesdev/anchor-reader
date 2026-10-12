@@ -1,5 +1,9 @@
 # Android QA
 
+## Open Design regression
+
+Follow [the screen and behavior map](OPEN_DESIGN.md) for issue #8 and children #9–#25. Check the five affected screens at 320/411dp, 800dp tablet, landscape and 200% text. Include long content, zero/partial/full reading visits, absent/current-concept questions, correct/wrong/skipped checks, final Complete and scoped results, source/full-text return and actual process restart. Verify lazy 3,000-concept overview selection/persistence. Preserve authentic settled screenshots; keep setup failures and early transition frames separate. Synthetic Chrome callbacks need signed-out first-run browser setup before tests. Do not describe separate passing retries as one clean full runner.
+
 Use a separate test emulator. Tests change app data. Do not use a personal device with saved books.
 
 ## Run

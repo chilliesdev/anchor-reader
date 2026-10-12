@@ -2,6 +2,14 @@ package com.anchorreader
 
 import android.net.Uri
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -72,7 +80,7 @@ class PracticeJourneyDeviceTest {
         compose.runOnIdle { voice.ready(); model.start(book) }
         compose.waitUntil(10_000) { voice.spoken.size == 1 }
         val spokenBefore = voice.spoken.size
-        compose.onNodeWithText("Quick check").performClick()
+        compose.onNodeWithContentDescription("Quick check").performClick()
         waitForScreen(Screen.CHECK)
         assertFalse(voice.state.value.playing)
         assertEquals(reading, model.state.value.currentProgress)
@@ -92,7 +100,7 @@ class PracticeJourneyDeviceTest {
         click("Next question")
         val third = model.state.value.questions[2]
         click("Skip")
-        click("Back to reading")
+        click("Continue reading")
 
         waitForScreen(Screen.PLAYER)
         compose.onNodeWithTag("current_sentence").assertTextEquals(book.units[0].sentences[1])
@@ -106,6 +114,42 @@ class PracticeJourneyDeviceTest {
         assertEquals(Outcome.CORRECT, reopened.answer(second))
         assertEquals(Outcome.SKIPPED, reopened.answer(third))
         assertEquals(reading, BookRepository(context).loadProgress(book.id))
+    }
+
+    @Test
+    fun completeShowsOnlySessionAnswersAndPreservesReadingProgressAfterRestart() {
+        DeviceEvidence.capture("imported-library-ready-questions")
+        compose.runOnIdle { voice.ready(); model.start(book) }
+        compose.waitUntil(10_000) { voice.spoken.isNotEmpty() }
+        compose.onNodeWithContentDescription("Quick check").performClick()
+        waitForScreen(Screen.CHECK)
+        val questions = model.state.value.questions.toList()
+        DeviceEvidence.capture("imported-concept-check-question")
+        answer(questions[0].correctIndex)
+        click("Next question")
+        answer((questions[1].correctIndex + 1) % questions[1].options.size)
+        click("Next question")
+        click("Skip")
+        click("Complete")
+        waitForScreen(Screen.FINISH)
+        assertEquals(questions, model.state.value.questions)
+        assertEquals(reading, model.state.value.currentProgress)
+        assertFalse(model.state.value.currentProgress.completed)
+        assertFalse(voice.state.value.playing)
+        compose.onNodeWithText("You completed this check.").assertExists()
+        compose.onNodeWithText("1 / 2").assertExists()
+        DeviceEvidence.capture("imported-concept-check-results")
+        compose.onNodeWithText("Wrong · Review suggested").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Skipped").assertExists()
+        compose.onNodeWithText("Answer record only. This is not a mastery score.").assertDoesNotExist()
+        compose.waitUntil(10_000) { model.state.value.currentPractice.answers.size == 3 }
+        scenario.close()
+        launchContent()
+        assertEquals(reading, model.state.value.progress[book.id])
+        val saved = model.state.value.practice.getValue(book.id)
+        assertEquals(Outcome.CORRECT, saved.answer(questions[0]))
+        assertEquals(Outcome.WRONG, saved.answer(questions[1]))
+        assertEquals(Outcome.SKIPPED, saved.answer(questions[2]))
     }
 
     @Test
@@ -150,6 +194,32 @@ class PracticeJourneyDeviceTest {
         assertEquals(reading, books.loadProgress(book.id))
         assertNull(model.state.value.browserUrl)
         assertFalse(model.state.value.account.signingIn)
+    }
+
+    @Test
+    fun narrowLargeTextOverviewActionsOpenOriginalPdfAndTranscript() {
+        scenario.onActivity { activity ->
+            activity.setContent {
+                val density = LocalDensity.current.density
+                CompositionLocalProvider(LocalDensity provides Density(density, 2f)) {
+                    AnchorTheme { Box(Modifier.width(320.dp).fillMaxHeight()) { ReaderApp(voice, model) } }
+                }
+            }
+        }
+        compose.runOnIdle { model.details(book) }
+        click("Source")
+        val sourcePage = book.units[reading.unitIndex].sourcePage ?: 1
+        waitForSourcePage(sourcePage)
+        compose.onNodeWithContentDescription("Source PDF page $sourcePage").assertExists()
+        compose.onNodeWithText("Back to lesson").performClick()
+        waitForScreen(Screen.OVERVIEW)
+        click("Full text")
+        compose.onNodeWithText("FULL TEXT").assertExists()
+        compose.onNodeWithContentDescription("Close transcript").performClick()
+        waitForScreen(Screen.OVERVIEW)
+        assertEquals(reading, model.state.value.currentProgress)
+        assertFalse(voice.state.value.playing)
+        assertFalse(model.state.value.autoplayRequested)
     }
 
     @Test

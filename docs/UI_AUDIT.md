@@ -1,4 +1,14 @@
-# Full-page concept swipe UI audit
+# Android UI audit
+
+## Open Design update
+
+12 October 2026. Independent rendered audit **PASSED** for issue #8 and children #9–#25 on reviewed base `538ef6783b701752d5389f0c1feae5c8890e36ec` plus final design changes. Exact design export: `8f70e4aac64a7cd39e7f297bddb48180b5802750`. Actual native Library, Overview, Player, Quick check and Results screens were captured and viewed at phone 411dp, narrow 320dp, tablet 800dp, landscape and 200% text, including long content and partial practice states.
+
+The lower-right player rail, sentence/footer group, clear video and compact cards match the design. Results keep whole summary words by stacking groups when needed. Overview keeps full Full text/Source labels by stacking actions when needed. Its concept rows form one joined card with rounded outer corners and single dividers while remaining lazy. All required controls, states and long content are reachable. Initial D1/D2 failed captures remain separate; fresh corrected captures passed. No required visual defect remains.
+
+Desktop native layout is unsupported; tablet/landscape provide wide evidence. Physical feel, spoken TalkBack and acoustic output remain unverified. [Behavior and checks](OPEN_DESIGN.md), [QA results](QA_RESULTS.md).
+
+## Previous full-page concept swipe UI audit
 
 11 October 2026. Independent rendered audit **PASSED**. The entire concept page moves: background/video, header, artwork, sentence, actions, count, progress and playback footer. Adjacent pages meet without a blank strip. Each preview has its own concept content. Moving controls do not trigger actions. Android system bars remain outside the page.
 

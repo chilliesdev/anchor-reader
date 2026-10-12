@@ -34,8 +34,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -44,6 +49,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,10 +73,14 @@ import com.anchorreader.chatgpt.ChatGptAccountState
 import kotlin.math.ceil
 
 @Composable
-fun AppHeader(onHome: () -> Unit, onSettings: () -> Unit) {
+fun AppHeader(onHome: () -> Unit, onSettings: () -> Unit, backToLibrary: Boolean = false) {
     Row(Modifier.fillMaxWidth().height(64.dp).background(Palette.Canvas).padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onHome) { AnchorMark(Modifier.size(28.dp).semantics { contentDescription = "AnchorReader home" }) }
+        if (backToLibrary) TextButton(onHome, modifier = Modifier.heightIn(min = 48.dp)) {
+            Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Back", modifier = Modifier.semantics { contentDescription = "Back to library" }, color = Palette.Ink)
+        } else IconButton(onHome) { AnchorMark(Modifier.size(28.dp).semantics { contentDescription = "AnchorReader home" }) }
         IconButton(onSettings) { Icon(Icons.Outlined.Settings, "Open settings", tint = Palette.Ink) }
     }
 }
@@ -119,16 +130,20 @@ private fun BookCard(book: Book, progress: Progress?, onStart: () -> Unit, onDet
     Surface(onStart, Modifier.fillMaxWidth().testTag("book_card_${book.id}").semantics { contentDescription = "Open ${book.title}" },
         shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Palette.Line), color = Palette.Surface) {
         Column {
-            Box(Modifier.fillMaxWidth().background(Palette.TealSoft).padding(horizontal = 20.dp, vertical = 16.dp)) {
-                val coverModifier = Modifier.fillMaxWidth().aspectRatio(2f).testTag("book_cover_${book.id}")
-                if (book.pdfPath != null) PdfCover(book.pdfPath, book.title, coverModifier)
-                else CoverArt(coverModifier)
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(104.dp).heightIn(min = 104.dp).background(Palette.TealSoft, RoundedCornerShape(12.dp)).padding(12.dp), contentAlignment = Alignment.Center) {
+                    val coverModifier = Modifier.fillMaxWidth().height(if (book.pdfPath != null) 112.dp else 56.dp).testTag("book_cover_${book.id}")
+                    if (book.pdfPath != null) PdfCover(book.pdfPath, book.title, coverModifier)
+                    else CoverArt(coverModifier)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(book.title, style = MaterialTheme.typography.titleLarge)
+                    if (book.author.isNotBlank()) Text(book.author, color = Palette.Muted, style = MaterialTheme.typography.bodyLarge)
+                    BookFacts(book, questionCount, compact = true)
+                }
             }
             HorizontalDivider(color = Palette.Line)
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(book.title, style = MaterialTheme.typography.titleLarge)
-                if (book.author.isNotBlank()) Text(book.author, color = Palette.Muted, style = MaterialTheme.typography.bodyMedium)
-                BookFacts(book, questionCount)
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 BookProgress(book, progress)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onStart, Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "${startLabel(progress)} ${book.title}" },
@@ -159,26 +174,22 @@ private class BookDraftViewModel : ViewModel() {
 @Composable
 private fun BookProgress(book: Book, progress: Progress?) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        HorizontalDivider(color = Palette.Line)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Outlined.BarChart, null, tint = Palette.Deep, modifier = Modifier.size(24.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(when {
-                    progress?.completed == true -> "Complete · ${progress.answers.size} checks"
-                    progress != null && progress.visited.isNotEmpty() -> "Concept ${progress.unitIndex + 1} of ${book.units.size}"
-                    else -> "Ready"
-                }, fontSize = 14.sp)
-                LinearProgressIndicator(progress = { if (book.units.isEmpty()) 0f else (progress?.visited?.size ?: 0).toFloat() / book.units.size },
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape), color = Palette.Teal,
-                    trackColor = Palette.Soft, drawStopIndicator = {})
-            }
-        }
+        Text(when {
+            progress?.completed == true -> "Complete · ${progress.answers.size} checks"
+            progress != null && progress.visited.isNotEmpty() -> "Concept ${progress.unitIndex + 1} of ${book.units.size}"
+            else -> "Ready"
+        }, modifier = Modifier.background(Palette.TealSoft, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+            color = Palette.Deep, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        LinearProgressIndicator(progress = { if (book.units.isEmpty()) 0f else (progress?.visited?.size ?: 0).toFloat() / book.units.size },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).testTag("book_progress_${book.id}"), color = Palette.Teal,
+            trackColor = Palette.Soft, drawStopIndicator = {})
     }
 }
 
 @Composable
-private fun BookFacts(book: Book, questionCount: Int? = null) {
-    Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+@OptIn(ExperimentalLayoutApi::class)
+private fun BookFacts(book: Book, questionCount: Int? = null, compact: Boolean = false) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Fact(Icons.AutoMirrored.Outlined.Article, "${book.units.size}", "${book.units.size} concepts")
         val minutes = remember(book) {
             val words = book.units.sumOf { unit -> unit.sentences.sumOf { it.trim().split(Regex("\\s+")).size } }
@@ -322,51 +333,61 @@ private fun IconBadge(icon: ImageVector) {
 }
 
 @Composable
-fun OverviewScreen(book: Book, progress: Progress?, onBack: () -> Unit, onStart: (Int?) -> Unit,
+@OptIn(ExperimentalLayoutApi::class)
+fun OverviewScreen(book: Book, progress: Progress?, onStart: (Int?) -> Unit,
     onSource: () -> Unit, onTranscript: () -> Unit, onDelete: () -> Unit,
     practice: PracticeRecord = PracticeRecord(book.documentVersion), onAddQuestions: () -> Unit = {},
     onCancelQuestions: () -> Unit = {}, onPractice: (Int?) -> Unit = {}, onManageUsage: () -> Unit = {}) {
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmTransfer by remember { mutableStateOf(false) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("overview_list"), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp)) {
         item(key = "heading") {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back to library") }
                 Text(book.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
                 if (book.author.isNotBlank()) Text(book.author, color = Palette.Muted)
                 BookFacts(book, if (book.isSample) null else practice.questions.size)
-                PrimaryButton(if (!book.isSample && progress?.visited.isNullOrEmpty()) "Read now" else startLabel(progress), { onStart(null) }, Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onTranscript) { Icon(Icons.AutoMirrored.Outlined.Notes, null); Spacer(Modifier.width(6.dp)); Text("Full text") }
-                    TextButton(onSource) { Icon(Icons.AutoMirrored.Outlined.Article, null); Spacer(Modifier.width(6.dp)); Text("Source") }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PrimaryButton(if (!book.isSample && progress?.visited.isNullOrEmpty()) "Read now" else startLabel(progress), { onStart(null) }, Modifier.fillMaxWidth())
+                    OverviewActions(onTranscript, onSource)
                 }
                 if (book.pdfPath != null) PracticeCard(book, practice, { confirmTransfer = true }, onCancelQuestions, { onPractice(null) }, onManageUsage)
-                Text("Concepts", fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-                HorizontalDivider(color = Palette.Line)
+            }
+        }
+        item(key = "concepts") {
+            FlowRow(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Concepts", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+                Text("${progress?.visited?.size ?: 0} of ${book.units.size} visited", color = Palette.Muted, fontSize = 13.sp)
             }
         }
         itemsIndexed(book.units, key = { index, _ -> "concept-$index" }) { index, unit ->
-            Column {
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { onStart(index) }.padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(32.dp).background(Palette.TealSoft, CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(if (index in (progress?.visited ?: emptySet())) Icons.Outlined.Check else Icons.Outlined.PlayArrow,
-                            null, tint = Palette.Deep, modifier = Modifier.size(18.dp))
+            val first = index == 0
+            val last = index == book.units.lastIndex
+            val shape = RoundedCornerShape(topStart = if (first) 16.dp else 0.dp, topEnd = if (first) 16.dp else 0.dp,
+                bottomStart = if (last) 16.dp else 0.dp, bottomEnd = if (last) 16.dp else 0.dp)
+            val visited = index in (progress?.visited ?: emptySet())
+            Column(Modifier.fillMaxWidth().clip(shape).background(Palette.Surface).conceptCardEdge(first, last).testTag("overview_concept_$index")) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 68.dp).clickable(role = Role.Button) { onStart(index) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(36.dp).background(if (visited) Palette.TealSoft else Palette.Soft, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(if (visited) Icons.Outlined.Check else Icons.Outlined.PlayArrow, null, tint = Palette.Deep, modifier = Modifier.size(20.dp))
                     }
-                    Text(unit.title, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold)
-                    Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(unit.title, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+                        Text(if (visited) "Visited" else "Ready", color = Palette.Muted, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = Palette.Muted)
                 }
                 if (book.pdfPath != null) {
                     val count = practice.questions.count { it.unitIndex == index }
-                    if (count > 0) TextButton({ onPractice(index) }, modifier = Modifier.heightIn(min = 48.dp)
+                    if (count > 0) TextButton({ onPractice(index) }, modifier = Modifier.padding(horizontal = 14.dp).heightIn(min = 48.dp)
                         .semantics { contentDescription = "Practice ${unit.title}, $count questions" }) { Text("Practice · $count questions") }
                     else Text(when (practice.task?.sections?.get(unit.id)) {
                         SectionQuestionStatus.INSUFFICIENT -> "Not enough source text for questions"
                         SectionQuestionStatus.FAILED -> "Questions need another try"
                         else -> "No questions yet"
-                    }, color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
+                    }, color = Palette.Muted, fontSize = 12.sp, modifier = Modifier.padding(start = 62.dp, end = 14.dp, bottom = 12.dp))
                 }
-                HorizontalDivider(color = Palette.Line)
+                if (!last) HorizontalDivider(Modifier.padding(horizontal = 1.dp), color = Palette.Line)
             }
         }
         item(key = "source") {
@@ -400,22 +421,82 @@ fun OverviewScreen(book: Book, progress: Progress?, onBack: () -> Unit, onStart:
         dismissButton = { TextButton({ confirmTransfer = false }) { Text("Keep reading") } })
 }
 
+/** Each lazy row draws its part of one continuous card, without duplicate row borders. */
+private fun Modifier.conceptCardEdge(first: Boolean, last: Boolean): Modifier = drawBehind {
+    val stroke = 1.dp.toPx()
+    val inset = stroke / 2
+    val corner = 16.dp.toPx()
+    val radius = corner - inset
+    val right = size.width - inset
+    val bottom = size.height - inset
+    drawLine(Palette.Line, Offset(inset, if (first) corner else 0f), Offset(inset, if (last) size.height - corner else size.height), stroke)
+    drawLine(Palette.Line, Offset(right, if (first) corner else 0f), Offset(right, if (last) size.height - corner else size.height), stroke)
+    val arcSize = Size(radius * 2, radius * 2)
+    if (first) {
+        drawLine(Palette.Line, Offset(corner, inset), Offset(size.width - corner, inset), stroke)
+        drawArc(Palette.Line, 180f, 90f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
+        drawArc(Palette.Line, 270f, 90f, false, Offset(right - arcSize.width, inset), arcSize, style = Stroke(stroke))
+    }
+    if (last) {
+        drawLine(Palette.Line, Offset(corner, bottom), Offset(size.width - corner, bottom), stroke)
+        drawArc(Palette.Line, 90f, 90f, false, Offset(inset, bottom - arcSize.height), arcSize, style = Stroke(stroke))
+        drawArc(Palette.Line, 0f, 90f, false, Offset(right - arcSize.width, bottom - arcSize.height), arcSize, style = Stroke(stroke))
+    }
+}
+
+@Composable
+private fun OverviewActions(onTranscript: () -> Unit, onSource: () -> Unit) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelLarge
+    val labelWidth = with(density) {
+        maxOf(measurer.measure("Full text", labelStyle).size.width,
+            measurer.measure("Source", labelStyle).size.width).toDp()
+    }
+    // Native button padding, plus its icon and gap, must fit beside the full label.
+    val actionWidth = labelWidth + 48.dp + 18.dp + 6.dp
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if ((maxWidth - 8.dp) / 2 >= actionWidth) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.weight(1f))
+                OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.weight(1f))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.fillMaxWidth())
+                OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewAction(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
+    OutlinedButton(onClick, modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Palette.Line),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = Palette.Surface, contentColor = Palette.Ink)) {
+        Icon(icon, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label)
+    }
+}
+
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun CheckScreen(question: RecallQuestion, number: Int, outcome: Outcome?, selected: Int?, onSelect: (Int) -> Unit,
     onSubmit: () -> Unit, onSkip: () -> Unit, onContinue: () -> Unit, onReview: () -> Unit, onSource: () -> Unit,
     total: Int = 0, sectionTitle: String = "", onRetry: () -> Unit = {}) {
-    PageColumn(gap = 20) {
+    PageColumn(gap = 16, scrollKey = question) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.align(Alignment.CenterVertically)) {
                 Eyebrow(if (total > 0) "QUESTION $number OF $total" else "CHECK / ${number.toString().padStart(2, '0')}")
             }
             TextButton(onReview, modifier = Modifier.heightIn(min = 48.dp).align(Alignment.CenterVertically)) { Text(if (total > 0) "Continue reading" else "Review") }
         }
-        Heading("Quick check", Modifier.semantics { heading() })
-        if (sectionTitle.isNotBlank()) Text(sectionTitle, fontWeight = FontWeight.SemiBold)
-        Text(question.prompt, color = Palette.Muted)
-        Text("Choose one answer", fontWeight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(sectionTitle.ifBlank { question.prompt }, fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+            Text(question.prompt, color = Palette.Muted)
+            Text("Choose one answer", fontWeight = FontWeight.Bold)
+        }
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             question.options.forEachIndexed { index, option ->
                 val checked = selected == index
@@ -445,49 +526,97 @@ fun CheckScreen(question: RecallQuestion, number: Int, outcome: Outcome?, select
                 }
             }
             if (total > 0 && outcome == Outcome.WRONG) SecondaryButton("Try again", onRetry, Modifier.fillMaxWidth())
-            PrimaryButton(if (total == 0) "Continue now" else if (number < total) "Next question" else "Back to reading", onContinue, Modifier.fillMaxWidth())
+            PrimaryButton(if (number < total) "Next question" else "Complete", onContinue, Modifier.fillMaxWidth())
         }
     }
 }
 
 @Composable
-fun FinishScreen(book: Book, progress: Progress, questions: List<RecallQuestion>, onReview: () -> Unit, onLibrary: () -> Unit, onSource: () -> Unit) {
-    PageColumn(gap = 20) {
-        Eyebrow("LESSON COMPLETE")
-        Heading(if (book.isSample) "You reached the end of this sample." else "You reached the end of this book.", Modifier.semantics { heading() })
-        Text("Answer record only. This is not a mastery score.", color = Palette.Muted)
-        Column {
-            HorizontalDivider(color = Palette.Line)
-            Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FinishStat("${progress.visited.size} / ${book.units.size}", "concepts visited", Modifier.weight(1f))
-                FinishStat("${progress.answers.values.count { it == Outcome.CORRECT }}", "checks correct", Modifier.weight(1f))
-                FinishStat("${progress.answers.values.count { it == Outcome.SKIPPED }}", "checks skipped", Modifier.weight(1f))
+fun FinishScreen(book: Book, progress: Progress, questions: List<RecallQuestion>, onReview: () -> Unit, onLibrary: () -> Unit, onSource: () -> Unit,
+    checkComplete: Boolean = false) {
+    PageColumn(gap = 24) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(36.dp).background(Palette.TealSoft, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.CheckCircle, null, tint = Palette.Deep, modifier = Modifier.size(20.dp))
+                }
+                Eyebrow(if (checkComplete) "CHECK COMPLETE" else "LESSON COMPLETE")
             }
-            HorizontalDivider(color = Palette.Line)
+            Heading(if (checkComplete) "You completed this check." else if (book.isSample) "You reached the end of this sample." else "You reached the end of this book.", Modifier.semantics { heading() })
         }
-        questions.forEachIndexed { index, question ->
-            val result = progress.answers[index]
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                Icon(when (result) { Outcome.CORRECT -> Icons.Outlined.CheckCircle; Outcome.WRONG -> Icons.Outlined.ErrorOutline; else -> Icons.Outlined.RemoveCircleOutline },
-                    null, tint = if (result == Outcome.CORRECT) Palette.SuccessInk else Palette.Muted, modifier = Modifier.size(22.dp))
-                Column {
-                    Text(book.units.getOrNull(question.unitIndex)?.title ?: question.prompt, fontSize = 14.sp)
-                    Text(when (result) { Outcome.CORRECT -> "Correct"; Outcome.WRONG -> "Wrong · Review suggested"; Outcome.SKIPPED -> "Skipped"; null -> "Not answered" },
-                        fontSize = 12.sp, color = Palette.Muted)
+        ResultsSummary(book, progress)
+        if (questions.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Your checks", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
+            Surface(shape = RoundedCornerShape(16.dp), color = Palette.Surface, border = BorderStroke(1.dp, Palette.Line)) {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    questions.forEachIndexed { index, question ->
+                        val result = progress.answers[index]
+                        Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val ink = when (result) { Outcome.CORRECT -> Palette.SuccessInk; Outcome.WRONG -> Palette.ErrorInk; else -> Palette.Muted }
+                            Box(Modifier.size(32.dp).background(when (result) { Outcome.CORRECT -> Palette.Success; Outcome.WRONG -> Palette.Error; else -> Palette.Soft }, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(when (result) { Outcome.CORRECT -> Icons.Outlined.CheckCircle; Outcome.WRONG -> Icons.Outlined.ErrorOutline; else -> Icons.Outlined.RemoveCircleOutline }, null, tint = ink, modifier = Modifier.size(20.dp))
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(book.units.getOrNull(question.unitIndex)?.title ?: question.prompt, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+                                Text(when (result) { Outcome.CORRECT -> "Correct"; Outcome.WRONG -> "Wrong · Review suggested"; Outcome.SKIPPED -> "Skipped"; null -> "Not answered" }, fontSize = 14.sp, color = ink)
+                            }
+                        }
+                        if (index < questions.lastIndex) HorizontalDivider(color = Palette.Line)
+                    }
                 }
             }
         }
-        PrimaryButton("Review lesson", onReview, Modifier.fillMaxWidth())
-        SecondaryButton("Back to library", onLibrary, Modifier.fillMaxWidth())
-        TextButton(onSource) { Text("Read source") }
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            PrimaryButton("Review", onReview, Modifier.fillMaxWidth())
+            SecondaryButton("Back to library", onLibrary, Modifier.fillMaxWidth())
+            TextButton(onSource, modifier = Modifier.heightIn(min = 48.dp)) { Text("Read source") }
+        }
     }
 }
+
+@Composable
+private fun ResultsSummary(book: Book, progress: Progress) {
+    val values = listOf("${progress.visited.size} / ${book.units.size}",
+        "${progress.answers.values.count { it == Outcome.CORRECT }}", "${progress.answers.values.count { it == Outcome.SKIPPED }}")
+    val captions = listOf("concepts visited", "checks correct", "checks skipped")
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val wordWidth = with(density) {
+        maxOf(
+            captions.flatMap { it.split(' ') }.maxOf { measurer.measure(it, TextStyle(fontSize = 13.sp)).size.width },
+            values.flatMap { it.split(' ') }.maxOf { measurer.measure(it, TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp)).size.width },
+        ).toDp()
+    }
+    Surface(shape = RoundedCornerShape(16.dp), color = Palette.TealSoft, border = BorderStroke(1.dp, Palette.Line)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp)) {
+            // Equal columns include two gaps and the inset after each vertical divider.
+            if ((maxWidth - 24.dp) / 3 - 12.dp >= wordWidth) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    values.indices.forEach { index ->
+                        FinishStat(values[index], captions[index], Modifier.weight(1f).then(if (index > 0) Modifier.borderStart() else Modifier))
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    values.indices.forEach { index ->
+                        if (index > 0) HorizontalDivider(color = Palette.Line)
+                        FinishStat(values[index], captions[index], Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Modifier.borderStart(): Modifier = drawBehind {
+    drawLine(Palette.Line, androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Offset(0f, size.height), strokeWidth = 1.dp.toPx())
+}.padding(start = 12.dp)
 
 @Composable
 private fun FinishStat(value: String, caption: String, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(value, fontFamily = FontFamily.Serif, fontSize = 24.sp)
-        Text(caption, fontSize = 11.sp, color = Palette.Muted, lineHeight = 16.sp)
+        Text(value, fontFamily = FontFamily.Serif, fontSize = 24.sp, lineHeight = 29.sp, color = Palette.Deep)
+        Text(caption, fontSize = 13.sp, color = Palette.Ink, lineHeight = 18.sp)
     }
 }
 
@@ -603,7 +732,8 @@ private fun ErrorMessage(text: String) {
 }
 
 @Composable
-private fun PageColumn(gap: Int = 16, ime: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().then(if (ime) Modifier.imePadding() else Modifier).verticalScroll(rememberScrollState())
+private fun PageColumn(gap: Int = 16, ime: Boolean = false, scrollKey: Any? = null, content: @Composable ColumnScope.() -> Unit) {
+    val scroll = key(scrollKey) { rememberScrollState() }
+    Column(Modifier.fillMaxSize().then(if (ime) Modifier.imePadding() else Modifier).verticalScroll(scroll)
         .padding(horizontal = 16.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(gap.dp), content = content)
 }

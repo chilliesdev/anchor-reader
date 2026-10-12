@@ -112,7 +112,7 @@ class PlaybackIntentDeviceTest {
         compose.onNodeWithContentDescription("Next concept").performClick()
         compose.waitUntil(10_000) { model.state.value.currentProgress.unitIndex == 2 }
         assertEquals(Screen.PLAYER, model.state.value.screen)
-        compose.onNodeWithText("Quick check").performClick()
+        compose.onNodeWithContentDescription("Quick check").performClick()
         compose.waitUntil(10_000) { model.state.value.screen == Screen.CHECK }
     }
 
