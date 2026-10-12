@@ -662,11 +662,11 @@ fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: 
         }
         HorizontalDivider(color = Palette.Line)
         Text("Reading and saved questions work on this device. Adding questions sends selected source text to OpenAI. Narration needs an installed offline English voice.", color = Palette.Muted, fontSize = 13.sp)
-        Text("Background video: GOES-16 imagery by CSU/CIRA and NOAA. Public domain.", color = Palette.Muted, fontSize = 12.sp)
+        Text("Background video: shared by @BrockRiddickIFB on X. Original watermark: @bluefit.stories.", color = Palette.Muted, fontSize = 12.sp)
         TextButton({
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://commons.wikimedia.org/wiki/File:Ocean_waves_northeast_of_northern_South_America_(CIRA_2021-09-10).webm"))) }
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://x.com/BrockRiddickIFB/status/2108122719547973921"))) }
         }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(12.dp)) {
-            Text("Video credit on Wikimedia Commons", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+            Text("Video source on X", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
         }
         SecondaryButton("Open-source licenses", onLicenses)
     }

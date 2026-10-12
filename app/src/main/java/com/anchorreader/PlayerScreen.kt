@@ -105,7 +105,7 @@ fun PlayerScreen(
     checkConcepts: Set<Int> = if (onCheck == null) emptySet() else setOf(progress.unitIndex),
 ) {
     val context = LocalContext.current
-    val poster = remember { BitmapFactory.decodeResource(context.resources, R.raw.ocean_poster).asImageBitmap() }
+    val poster = remember { BitmapFactory.decodeResource(context.resources, R.raw.workshop_poster).asImageBitmap() }
     val pager = key(book.id) { rememberPagerState(initialPage = progress.unitIndex) { book.units.size } }
     val fling = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))
     val modelUnit by rememberUpdatedState(progress.unitIndex)
@@ -433,7 +433,7 @@ private fun BackgroundVideo(active: Boolean, modifier: Modifier, onFailure: () -
                 override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                     try {
                         val surface = Surface(texture)
-                        player = MediaPlayer.create(context, R.raw.ocean)?.apply {
+                        player = MediaPlayer.create(context, R.raw.workshop_background)?.apply {
                             setSurface(surface)
                             isLooping = true
                             setVolume(0f, 0f)
