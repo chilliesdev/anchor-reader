@@ -49,7 +49,8 @@ internal class LocalHttpFixture(ssl: SSLContext? = null) {
     fun stop() {
         stopped = true
         server.close()
-        active.toList().forEach { runCatching { it.close() } }
+        // Socket handlers can remove entries during shutdown; iterate without a size-based snapshot.
+        active.forEach { runCatching { it.close() } }
         (executor as? ExecutorService)?.shutdownNow()
     }
 

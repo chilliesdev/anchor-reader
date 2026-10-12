@@ -16,6 +16,8 @@ import com.anchorreader.data.QuestionTaskStatus
 import com.anchorreader.data.SectionQuestionStatus
 import com.anchorreader.data.QuestionSources
 import com.anchorreader.data.QuestionValidator
+import com.anchorreader.data.savedQuestions
+import com.anchorreader.data.practiceStartIndex
 import com.anchorreader.chatgpt.ChatGptProvider
 import com.anchorreader.chatgpt.ChatGptAccountState
 import com.anchorreader.chatgpt.ProviderException
@@ -57,7 +59,7 @@ data class ReaderState(
     val book: Book get() = books.find { it.id == activeId } ?: SampleLesson.book
     val currentProgress: Progress get() = progress[activeId] ?: Progress()
     val currentPractice: PracticeRecord get() = practice[activeId] ?: PracticeRecord(book.documentVersion)
-    val savedQuestions: List<RecallQuestion> get() = if (book.isSample) SampleLesson.questions else currentPractice.questions
+    val savedQuestions: List<RecallQuestion> get() = savedQuestions(book, currentPractice)
     val questions: List<RecallQuestion> get() = if (screen in setOf(Screen.CHECK, Screen.FINISH) && practiceSession.isNotEmpty()) practiceSession else savedQuestions
     val resultAnswers: Map<Int, Outcome> get() = questions.mapIndexedNotNull { index, question ->
         val outcome = if (book.isSample) currentProgress.answers[SampleLesson.questions.indexOf(question)] else currentPractice.answer(question)
@@ -251,6 +253,7 @@ class ReaderViewModel internal constructor(application: Application, private val
     fun continueAfterQuestion() {
         if (state.value.outcome == null) return
         if (state.value.questionIndex + 1 < state.value.questions.size) update { it.copy(questionIndex = it.questionIndex + 1, selectedAnswer = null, outcome = null) }
+        else if (state.value.practiceReturnScreen == Screen.OVERVIEW) closePractice()
         else update { it.copy(screen = Screen.FINISH, autoplayRequested = false) }
     }
 
@@ -258,11 +261,13 @@ class ReaderViewModel internal constructor(application: Application, private val
 
     fun openPractice(unit: Int? = null) {
         val current = state.value
-        if (current.loading || current.book.isSample) return
-        val questions = current.currentPractice.questions.filter { unit == null || it.unitIndex == unit }
+        if (current.loading) return
+        val questions = current.savedQuestions.filter { unit == null || it.unitIndex == unit }
         if (questions.isEmpty()) return
         update { it.copy(screen = Screen.CHECK, practiceReturnScreen = current.screen,
-            practiceSession = questions, questionIndex = 0, selectedAnswer = null, outcome = null, autoplayRequested = false) }
+            practiceSession = questions,
+            questionIndex = if (current.screen == Screen.OVERVIEW) practiceStartIndex(current.book, current.currentProgress, current.currentPractice, questions) else 0,
+            selectedAnswer = null, outcome = null, autoplayRequested = false) }
     }
 
     fun closePractice() = update { it.copy(screen = it.practiceReturnScreen, autoplayRequested = false, practiceSession = emptyList(), selectedAnswer = null, outcome = null) }

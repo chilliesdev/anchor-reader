@@ -177,7 +177,7 @@ class PlayerSwipeDeviceTest {
     }
 
     @Test
-    fun longSentenceScrollsAndVideoBackgroundAndLowerControlsSwipe() {
+    fun longSentencePartsAndTextSwipeChangesWholeConceptDirectly() {
         val book = Book("long-swipe", "Long sentences", "QA", listOf(
             Concept("Long topic", listOf("This complete sentence has all its source words ".repeat(150) + "here.")),
             Concept("Next topic", listOf("The next topic starts here.")),
@@ -192,21 +192,20 @@ class PlayerSwipeDeviceTest {
                     onCheck = null, onStill = {}, onSource = {}, onVoiceSettings = {}, onPreviousSentence = {}, onNextSentence = {})
             }
         }
-        val before = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot.top
+        compose.onNodeWithTag("sentence_part_count").assertTextContains("Part 1 of", substring = true)
+        compose.onNodeWithTag("previous_sentence_part").assertIsNotEnabled()
+        compose.onNodeWithTag("next_sentence_part").performClick()
+        compose.onNodeWithTag("sentence_part_count").assertTextContains("Part 2 of", substring = true)
+        compose.onNodeWithTag("sentence_count").assertTextEquals("1 / 1")
+        compose.onNodeWithTag("concept_art_0").assertDoesNotExist()
         compose.onNodeWithTag("current_sentence").performTouchInput { swipeUp() }
-        compose.onNodeWithText("CONCEPT 1 OF 2").assertExists()
-        val after = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot.top
-        assertTrue("A complete long sentence cannot scroll", after < before)
-        // Start a swipe on the counter beside Play. This remains reliable while text can scroll.
-        compose.onNodeWithTag("sentence_count").performTouchInput {
-            swipe(start = center, end = center.copy(y = center.y - 300f))
-        }
         compose.onNodeWithText("CONCEPT 2 OF 2").assertExists()
         // The clear background above the short sentence also navigates in the other direction.
         compose.onNodeWithTag("concept_video").performTouchInput {
             swipe(start = Offset(width * .5f, height * .15f), end = Offset(width * .5f, height * .4f))
         }
         compose.onNodeWithText("CONCEPT 1 OF 2").assertExists()
+        compose.onNodeWithTag("sentence_part_count").assertTextContains("Part 1 of", substring = true)
         compose.onNodeWithTag("concept_video").performTouchInput {
             swipe(start = Offset(width * .5f, height * .15f), end = Offset(width * .5f, height * .4f))
         }
@@ -285,7 +284,7 @@ class PlayerSwipeDeviceTest {
             Concept("First concept", listOf("Sentence in first concept.", "Another sentence in first concept.")),
             Concept("Second concept", listOf("Sentence in second concept.", "Another second sentence.", "Third second sentence.")),
             Concept("Third concept", listOf("Sentence in third concept.")),
-        ), "Original text"))
+        ), "Original text", isSample = true))
         val commits = mutableListOf<Int>()
         val actions = mutableListOf<String>()
     }

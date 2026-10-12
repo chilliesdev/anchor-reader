@@ -26,6 +26,7 @@ import com.anchorreader.data.QuestionSource
 import com.anchorreader.data.QuestionTaskStatus
 import com.anchorreader.data.QuestionValidator
 import com.anchorreader.data.RecallQuestion
+import com.anchorreader.data.SampleLesson
 import com.anchorreader.data.normalizedSource
 import com.anchorreader.ui.AnchorTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -153,10 +154,10 @@ class PracticeJourneyDeviceTest {
     }
 
     @Test
-    fun continueReadingAndSystemBackReturnToDetailsWithoutChangingPosition() {
+    fun backToBookAndSystemBackReturnToDetailsWithoutChangingPosition() {
         compose.runOnIdle { model.details(book) }
         openAllPractice()
-        click("Continue reading")
+        click("Back to book")
         waitForScreen(Screen.OVERVIEW)
         assertEquals(reading, model.state.value.currentProgress)
 
@@ -185,11 +186,11 @@ class PracticeJourneyDeviceTest {
         compose.runOnIdle { model.details(book) }
         openAllPractice()
         click("Skip")
-        val question = model.state.value.questions.first()
+        val question = model.state.value.questions[model.state.value.questionIndex]
         click("View source · page ${question.sourcePage}")
         waitForSourcePage(question.sourcePage)
         compose.onNodeWithText("Back to lesson").performClick()
-        click("Continue reading")
+        click("Back to book")
         waitForScreen(Screen.OVERVIEW)
         assertEquals(reading, books.loadProgress(book.id))
         assertNull(model.state.value.browserUrl)
@@ -244,6 +245,73 @@ class PracticeJourneyDeviceTest {
         assertEquals(QuestionTaskStatus.COMPLETE, model.state.value.practice[book.id]?.task?.status)
     }
 
+    @Test
+    fun overviewResumesFirstUnansweredCountsAllOutcomesAndRepeatsWithoutClearingAnswers() {
+        compose.runOnIdle { model.details(book) }
+        compose.onNodeWithText("Start practice").performScrollTo().assertIsDisplayed()
+        openAllPractice()
+        val questions = model.state.value.questions.toList()
+        answer((questions[0].correctIndex + 1) % questions[0].options.size)
+        compose.waitUntil(10_000) { model.state.value.currentPractice.answer(questions[0]) == Outcome.WRONG }
+        click("Back to book")
+        waitForScreen(Screen.OVERVIEW)
+        compose.onNodeWithText("Continue practice").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("practice_answered_count").assertTextEquals("1")
+        DeviceEvidence.capture("issue28-pdf-ready-partial")
+        openAllPractice()
+        assertEquals(1, model.state.value.questionIndex)
+        click("Skip")
+        compose.waitUntil(10_000) { model.state.value.currentPractice.answer(questions[1]) == Outcome.SKIPPED }
+        click("Next question")
+        answer(questions[2].correctIndex)
+        compose.waitUntil(10_000) { model.state.value.currentPractice.answer(questions[2]) == Outcome.CORRECT }
+        click("Complete")
+        waitForScreen(Screen.OVERVIEW)
+        compose.onNodeWithText("Practice again").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("practice_answered_count").assertTextEquals("3")
+        compose.onNodeWithTag("practice_coverage").assertTextEquals("From 1 of 2 concepts")
+        DeviceEvidence.capture("issue28-pdf-practice-complete")
+        openAllPractice()
+        assertEquals(0, model.state.value.questionIndex)
+        assertEquals(Outcome.WRONG, model.state.value.currentPractice.answer(questions[0]))
+        assertEquals(Outcome.SKIPPED, model.state.value.currentPractice.answer(questions[1]))
+        assertEquals(Outcome.CORRECT, model.state.value.currentPractice.answer(questions[2]))
+        assertEquals(reading, model.state.value.currentProgress)
+        assertEquals(reading, books.loadProgress(book.id))
+        assertFalse(model.state.value.autoplayRequested)
+    }
+
+    @Test
+    fun sampleOverviewPracticePersistsAnswersReturnsToBookAndResumesAfterRestart() {
+        compose.runOnIdle { model.details(SampleLesson.book) }
+        openAllPractice()
+        assertEquals(SampleLesson.questions, model.state.value.questions)
+        assertEquals(0, model.state.value.questionIndex)
+        answer(1)
+        click("Back to book")
+        waitForScreen(Screen.OVERVIEW)
+        compose.onNodeWithText("Continue practice").performScrollTo().assertIsDisplayed()
+        scenario.close()
+        launchContent()
+        compose.runOnIdle { model.details(SampleLesson.book) }
+        openAllPractice()
+        assertEquals(1, model.state.value.questionIndex)
+        click("Skip")
+        click("Next question")
+        answer(SampleLesson.questions.last().correctIndex)
+        click("Complete")
+        waitForScreen(Screen.OVERVIEW)
+        compose.onNodeWithText("Practice again").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("practice_answered_count").assertTextEquals("3")
+        compose.onNodeWithTag("practice_coverage").assertTextEquals("From 3 of 4 concepts")
+        DeviceEvidence.capture("issue28-sample-practice-complete")
+        openAllPractice()
+        assertEquals(0, model.state.value.questionIndex)
+        assertEquals(mapOf(0 to Outcome.WRONG, 1 to Outcome.SKIPPED, 2 to Outcome.CORRECT), model.state.value.currentProgress.answers)
+        assertTrue(model.state.value.currentProgress.visited.isEmpty())
+        assertFalse(model.state.value.currentProgress.completed)
+    }
+
     private fun launchContent() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario.onActivity {
@@ -254,7 +322,7 @@ class PracticeJourneyDeviceTest {
     }
 
     private fun openAllPractice() {
-        compose.onNode(hasText("Practice questions") and hasClickAction()).performScrollTo().performClick()
+        compose.onNodeWithTag("overview_practice_action").performScrollTo().performClick()
         waitForScreen(Screen.CHECK)
     }
 
