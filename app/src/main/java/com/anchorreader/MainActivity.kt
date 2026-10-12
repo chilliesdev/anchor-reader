@@ -123,7 +123,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             if (dialog != null) dialog = null
             else when (state.screen) {
                 Screen.SETTINGS -> model.closeSettings()
-                Screen.CHECK -> if (state.book.isSample) model.navigate(Screen.OVERVIEW) else model.closePractice()
+                Screen.CHECK -> model.closePractice()
                 Screen.PLAYER, Screen.FINISH -> model.navigate(Screen.OVERVIEW)
                 else -> model.navigate(Screen.LIBRARY)
             }
@@ -154,7 +154,11 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
         Scaffold(
             containerColor = Palette.Canvas,
             snackbarHost = { SnackbarHost(snackbar) },
-            topBar = { Column(Modifier.statusBarsPadding()) { AppHeader(onHome = { model.navigate(Screen.LIBRARY) }, onSettings = { model.openSettings() }) } },
+            topBar = {
+                if (state.screen !in listOf(Screen.CHECK, Screen.FINISH)) Column(Modifier.statusBarsPadding()) {
+                    AppHeader(onHome = { model.navigate(Screen.LIBRARY) }, onSettings = { model.openSettings() }, backToLibrary = state.screen == Screen.OVERVIEW)
+                }
+            },
             bottomBar = {
                 if (state.screen in listOf(Screen.LIBRARY, Screen.NEW, Screen.OVERVIEW)) {
                     Column(Modifier.navigationBarsPadding().imePadding()) { AppTabs(state.screen == Screen.NEW, { model.navigate(Screen.NEW) }, { model.navigate(Screen.LIBRARY) }) }
@@ -166,15 +170,15 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
                 else when (state.screen) {
                     Screen.LIBRARY -> LibraryScreen(state.books, state.progress, { pauseAnd { model.start(it) } }, { pauseAnd { model.details(it) } }, state.practice)
                     Screen.NEW -> NewBookScreen(model::saveText, model::importPdf, state.loading, state.error, { model.navigate(Screen.LIBRARY) })
-                    Screen.OVERVIEW -> OverviewScreen(state.book, state.currentProgress, { model.navigate(Screen.LIBRARY) }, { pauseAnd { model.start(state.book, it) } }, { dialog = "source" }, { dialog = "transcript" }, model::deleteBook,
+                    Screen.OVERVIEW -> OverviewScreen(state.book, state.currentProgress, { pauseAnd { model.start(state.book, it) } }, { dialog = "source" }, { dialog = "transcript" }, model::deleteBook,
                         state.currentPractice, model::addQuestions, model::cancelQuestions, { unit -> pauseAnd { model.openPractice(unit) } }, ::manageUsage)
                     Screen.CHECK -> CheckScreen(state.questions[state.questionIndex], state.questionIndex + 1, state.outcome, state.selectedAnswer, model::selectAnswer, { model.answer() }, { model.answer(true) }, model::continueAfterQuestion, model::reviewConcept, { dialog = "source" },
-                        total = if (state.book.isSample) 0 else state.questions.size,
-                        sectionTitle = if (state.book.isSample) "" else state.book.units[state.questions[state.questionIndex].unitIndex].title,
+                        total = state.questions.size,
+                        sectionTitle = state.book.units[state.questions[state.questionIndex].unitIndex].title,
                         onRetry = model::retryQuestion)
                     Screen.FINISH -> {
-                        val summary = if (state.book.isSample) state.currentProgress else state.currentProgress.copy(answers = state.questions.mapIndexedNotNull { index, q -> state.currentPractice.answer(q)?.let { index to it } }.toMap())
-                        FinishScreen(state.book, summary, state.questions, { model.start(state.book, 0) }, { model.navigate(Screen.LIBRARY) }, { dialog = "source" })
+                        val summary = state.currentProgress.copy(answers = state.resultAnswers)
+                        FinishScreen(state.book, summary, state.questions, { model.start(state.book, 0) }, { model.navigate(Screen.LIBRARY) }, { dialog = "source" }, checkComplete = state.practiceSession.isNotEmpty())
                     }
                     Screen.SETTINGS -> SettingsScreen(state.stillMode, model::setStill, state.storedBytes, voice.status, { openVoiceSettings(context) }, model::resetProgress, model::closeSettings, onLicenses = { dialog = "licenses" },
                         account = state.account, onConnect = model::connectChatGpt, onSignOut = model::signOutChatGpt,

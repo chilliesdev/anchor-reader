@@ -57,8 +57,12 @@ data class ReaderState(
     val book: Book get() = books.find { it.id == activeId } ?: SampleLesson.book
     val currentProgress: Progress get() = progress[activeId] ?: Progress()
     val currentPractice: PracticeRecord get() = practice[activeId] ?: PracticeRecord(book.documentVersion)
-    val questions: List<RecallQuestion> get() = if (book.isSample) SampleLesson.questions
-        else if (screen == Screen.CHECK) practiceSession else currentPractice.questions
+    val savedQuestions: List<RecallQuestion> get() = if (book.isSample) SampleLesson.questions else currentPractice.questions
+    val questions: List<RecallQuestion> get() = if (screen in setOf(Screen.CHECK, Screen.FINISH) && practiceSession.isNotEmpty()) practiceSession else savedQuestions
+    val resultAnswers: Map<Int, Outcome> get() = questions.mapIndexedNotNull { index, question ->
+        val outcome = if (book.isSample) currentProgress.answers[SampleLesson.questions.indexOf(question)] else currentPractice.answer(question)
+        outcome?.let { index to it }
+    }.toMap()
 }
 
 class ReaderViewModel internal constructor(application: Application, private val provider: ChatGptProvider,
@@ -157,7 +161,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         val index = (unit ?: if (previous.completed) 0 else previous.unitIndex).coerceIn(book.units.indices)
         val sentence = if (unit != null || previous.completed) 0 else previous.sentenceIndex.coerceIn(book.units[index].sentences.indices)
         persist(previous.copy(unitIndex = index, sentenceIndex = sentence, visited = previous.visited + index))
-        update { it.copy(screen = Screen.PLAYER, error = null, playbackRequest = it.playbackRequest + 1, autoplayRequested = true) }
+        update { it.copy(screen = Screen.PLAYER, error = null, practiceSession = emptyList(), playbackRequest = it.playbackRequest + 1, autoplayRequested = true) }
     }
 
     fun cancelPlaybackRequest() = update { it.copy(autoplayRequested = false) }
@@ -196,10 +200,11 @@ class ReaderViewModel internal constructor(application: Application, private val
 
     fun openRecall() {
         if (!state.value.book.isSample) { openPractice(state.value.currentProgress.unitIndex); return }
-        val question = state.value.questions.indexOfFirst { it.unitIndex == state.value.currentProgress.unitIndex }
-        if (question >= 0) {
-            update { it.copy(screen = Screen.CHECK, questionIndex = question, selectedAnswer = null, outcome = null, autoplayRequested = false) }
-        }
+        val current = state.value
+        val index = SampleLesson.questions.indexOfFirst { it.unitIndex == current.currentProgress.unitIndex }
+        if (index >= 0) update { it.copy(screen = Screen.CHECK, practiceReturnScreen = current.screen,
+            practiceSession = SampleLesson.questions.drop(index), questionIndex = 0,
+            selectedAnswer = null, outcome = null, autoplayRequested = false) }
     }
 
     private fun advanceUnit() {
@@ -207,7 +212,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         if (current.unitIndex + 1 < state.value.book.units.size) start(state.value.book, current.unitIndex + 1)
         else {
             persist(current.copy(completed = true))
-            navigate(Screen.FINISH)
+            update { it.copy(screen = Screen.FINISH, practiceSession = emptyList(), autoplayRequested = false) }
         }
     }
 
@@ -217,7 +222,7 @@ class ReaderViewModel internal constructor(application: Application, private val
         if (current.outcome != null || (!skip && current.selectedAnswer == null)) return
         val question = current.questions[current.questionIndex]
         val outcome = if (skip) Outcome.SKIPPED else if (current.selectedAnswer == question.correctIndex) Outcome.CORRECT else Outcome.WRONG
-        if (current.book.isSample) persist(current.currentProgress.copy(answers = current.currentProgress.answers + (current.questionIndex to outcome)))
+        if (current.book.isSample) persist(current.currentProgress.copy(answers = current.currentProgress.answers + (SampleLesson.questions.indexOf(question) to outcome)))
         else {
             val epoch = storageEpoch
             val version = bookVersions[current.book.id] ?: 0L
@@ -245,12 +250,11 @@ class ReaderViewModel internal constructor(application: Application, private val
 
     fun continueAfterQuestion() {
         if (state.value.outcome == null) return
-        if (state.value.book.isSample) { advanceUnit(); return }
         if (state.value.questionIndex + 1 < state.value.questions.size) update { it.copy(questionIndex = it.questionIndex + 1, selectedAnswer = null, outcome = null) }
-        else closePractice()
+        else update { it.copy(screen = Screen.FINISH, autoplayRequested = false) }
     }
 
-    fun reviewConcept() { if (state.value.book.isSample) start(state.value.book, state.value.currentProgress.unitIndex) else closePractice() }
+    fun reviewConcept() = closePractice()
 
     fun openPractice(unit: Int? = null) {
         val current = state.value

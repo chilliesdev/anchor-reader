@@ -53,7 +53,7 @@ class ReaderJourneyTest {
         waitForText("FULL TEXT")
         compose.onNodeWithText(sample.units.first().sentences.joinToString(" ")).assertExists()
         compose.onNodeWithContentDescription("Close transcript").performClick()
-        compose.onNodeWithContentDescription("Open source").performClick()
+        compose.onNodeWithContentDescription("Open source").performScrollTo().performClick()
         val sourceBack = compose.onNodeWithText("Back to lesson").assertIsDisplayed()
         val sourceBackBounds = sourceBack.fetchSemanticsNode().boundsInWindow
         val display = context.resources.displayMetrics
@@ -74,57 +74,69 @@ class ReaderJourneyTest {
         waitForText(sample.units.first().sentences.first())
 
         // The first concept has no recall check. Exercise both concept controls.
-        compose.onNodeWithContentDescription("Next concept").performClick()
+        compose.onNodeWithContentDescription("Next concept").performScrollTo().performClick()
         waitForText(sample.units[1].title)
         compose.onNodeWithContentDescription("Previous concept").assertIsEnabled().performClick()
         waitForText(sample.units.first().title)
 
+        DeviceEvidence.capture("sample-player-disabled-check")
+        compose.onNodeWithContentDescription("Quick check").assertIsNotEnabled()
+        compose.onNodeWithText("Quick check").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Next concept").performScrollTo().performClick()
+        waitForText(sample.units[1].title)
+        compose.onNodeWithContentDescription("Next concept").performScrollTo().performClick()
+        waitForText(sample.units[2].title)
+        compose.onNodeWithContentDescription("Previous concept").performScrollTo().performClick()
+        waitForText(sample.units[1].title)
+        compose.onNodeWithContentDescription("Quick check").assertIsEnabled().performClick()
+        DeviceEvidence.capture("sample-check-question")
         val expected = mutableMapOf<Int, Outcome>()
-        sample.units.indices.forEach { unitIndex ->
-            waitForText(sample.units[unitIndex].title)
-            val question = SampleLesson.questions.firstOrNull { it.unitIndex == unitIndex }
-            if (question != null) {
-                compose.onNodeWithText("Quick check").performClick()
-                waitForText("Quick check")
-                compose.onNodeWithText("Check answer").assertIsNotEnabled()
-                val questionIndex = SampleLesson.questions.indexOf(question)
-                val outcome = when (questionIndex) {
-                    0 -> {
-                        compose.onNodeWithText(question.options[question.correctIndex]).performScrollTo().performClick()
-                        clickText("Check answer")
-                        waitForText("Correct")
-                        Outcome.CORRECT
-                    }
-                    1 -> {
-                        val wrong = (question.correctIndex + 1) % question.options.size
-                        compose.onNodeWithText(question.options[wrong]).performScrollTo().performClick()
-                        clickText("Check answer")
-                        waitForText("Review this idea")
-                        Outcome.WRONG
-                    }
-                    else -> {
-                        clickText("I do not know")
-                        waitForText("Skipped")
-                        Outcome.SKIPPED
-                    }
+        SampleLesson.questions.forEachIndexed { questionIndex, question ->
+            waitForText(sample.units[question.unitIndex].title)
+            compose.onNodeWithText("Quick check").assertDoesNotExist()
+            compose.onNodeWithText("Check answer").assertIsNotEnabled()
+            val outcome = when (questionIndex) {
+                0 -> {
+                    compose.onNodeWithText(question.options[question.correctIndex]).performScrollTo().performClick()
+                    clickText("Check answer")
+                    waitForText("Correct")
+                    Outcome.CORRECT
                 }
-                expected[questionIndex] = outcome
-                clickText("Continue now")
-            } else compose.onNodeWithContentDescription("Next concept").performClick()
+                1 -> {
+                    val wrong = (question.correctIndex + 1) % question.options.size
+                    compose.onNodeWithText(question.options[wrong]).performScrollTo().performClick()
+                    clickText("Check answer")
+                    waitForText("Review this idea")
+                    Outcome.WRONG
+                }
+                else -> {
+                    clickText("Skip")
+                    waitForText("Skipped")
+                    Outcome.SKIPPED
+                }
+            }
+            expected[questionIndex] = outcome
+            clickText(if (questionIndex < SampleLesson.questions.lastIndex) "Next question" else "Complete")
         }
-        waitForText("You reached the end of this sample.")
-        compose.onNodeWithText("Answer record only. This is not a mastery score.").assertExists()
+        waitForText("You completed this check.")
+        compose.onNodeWithText("3 / 4").assertExists()
+        DeviceEvidence.capture("sample-check-results-partial-visits")
+        compose.onNodeWithText("Answer record only. This is not a mastery score.").assertDoesNotExist()
         compose.onNodeWithText("Wrong · Review suggested").assertExists()
         compose.onNodeWithText("Not answered").assertDoesNotExist()
-        compose.waitUntil(10_000) { BookRepository(context).loadProgress(sample.id).completed }
+        compose.waitUntil(10_000) { BookRepository(context).loadProgress(sample.id).answers == expected }
         val saved = BookRepository(context).loadProgress(sample.id)
-        assertEquals(sample.units.indices.toSet(), saved.visited)
+        assertEquals(setOf(0, 1, 2), saved.visited)
+        assertFalse(saved.completed)
         assertEquals(expected, saved.answers)
+        clickText("Back to library")
+        waitForText(sample.title)
+        DeviceEvidence.capture("sample-library-partial-visits")
 
         restart()
         assertEquals(expected, BookRepository(context).loadProgress(sample.id).answers)
-        compose.onNodeWithContentDescription("Review ${sample.title}").performScrollTo().performClick()
-        waitForText(sample.units.first().sentences.first())
+        compose.onNodeWithContentDescription("Continue ${sample.title}").performScrollTo().performClick()
+        waitForText(sample.units[1].sentences.first())
         compose.onNodeWithContentDescription("Turn off still mode").assertExists()
     }
 
@@ -148,7 +160,7 @@ class ReaderJourneyTest {
         assertFalse(saved.isSample)
         compose.onNodeWithContentDescription("Start QA notebook").performScrollTo().performClick()
         waitForText(saved.units.first().sentences.first())
-        compose.onNodeWithContentDescription("Next concept").performClick()
+        compose.onNodeWithContentDescription("Next concept").performScrollTo().performClick()
         waitForText("You reached the end of this book.")
         clickText("Back to library")
         restart()
@@ -191,13 +203,15 @@ class ReaderJourneyTest {
             compose.waitUntil(10_000) { context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
             waitForText(sample.units.first().title)
             listOf("Read full transcript", "Open source", "Previous concept", "Next concept").forEach {
-                assertControlInsideWindow(compose.onNodeWithContentDescription(it), it)
+                val control = compose.onNodeWithContentDescription(it)
+                if (it != "Read full transcript") control.performScrollTo()
+                assertControlInsideWindow(control, it)
             }
-            compose.onNodeWithContentDescription("Next concept").performClick()
+            compose.onNodeWithContentDescription("Next concept").performScrollTo().performClick()
             waitForText(sample.units[1].title)
-            compose.onNodeWithContentDescription("Previous concept").performClick()
+            compose.onNodeWithContentDescription("Previous concept").performScrollTo().performClick()
             waitForText(sample.units.first().title)
-            compose.onNodeWithContentDescription("Open source").performClick()
+            compose.onNodeWithContentDescription("Open source").performScrollTo().performClick()
             val sourceBack = compose.onNodeWithText("Back to lesson")
             assertControlInsideWindow(sourceBack, "Source footer")
             assertTrue("Source footer is clipped in landscape", sourceBack.fetchSemanticsNode().boundsInWindow.height >= 40 * context.resources.displayMetrics.density - 2)
@@ -212,7 +226,7 @@ class ReaderJourneyTest {
             compose.onNodeWithContentDescription("Back to lesson outline").performClick()
             compose.onNodeWithText("Library").performClick()
             compose.onNodeWithContentDescription("Start $longTitle").performScrollTo().performClick()
-            compose.onNodeWithContentDescription("Open source").performClick()
+            compose.onNodeWithContentDescription("Open source").performScrollTo().performClick()
             compose.onNodeWithText(sourceText).performScrollTo().assertIsDisplayed()
             val textSourceBack = compose.onNodeWithText("Back to lesson")
             assertControlInsideWindow(textSourceBack, "Long-title source footer")

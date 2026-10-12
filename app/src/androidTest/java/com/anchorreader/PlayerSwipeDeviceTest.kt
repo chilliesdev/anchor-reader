@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -191,9 +193,7 @@ class PlayerSwipeDeviceTest {
             }
         }
         val before = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot.top
-        compose.onNodeWithTag("concept_video").performTouchInput {
-            swipe(start = Offset(width * .3f, height * .6f), end = Offset(width * .3f, height * .35f))
-        }
+        compose.onNodeWithTag("current_sentence").performTouchInput { swipeUp() }
         compose.onNodeWithText("CONCEPT 1 OF 2").assertExists()
         val after = compose.onNodeWithTag("current_sentence").fetchSemanticsNode().boundsInRoot.top
         assertTrue("A complete long sentence cannot scroll", after < before)
@@ -211,6 +211,32 @@ class PlayerSwipeDeviceTest {
             swipe(start = Offset(width * .5f, height * .15f), end = Offset(width * .5f, height * .4f))
         }
         compose.onNodeWithText("CONCEPT 1 OF 2").assertExists()
+    }
+
+    @Test
+    fun railOrderTitleAndSentenceProgressMatchCurrentConcept() {
+        val state = player()
+        compose.onNodeWithContentDescription("Quick check").assertIsNotEnabled()
+        compose.onNodeWithText("Quick check").assertDoesNotExist()
+        val labels = listOf("Previous concept", "Next concept", "Turn off still mode", "Open source", "Quick check")
+        val bounds = labels.map { compose.onNodeWithContentDescription(it).fetchSemanticsNode().boundsInRoot }
+        bounds.zipWithNext().forEach { (first, second) ->
+            assertEquals(first.left, second.left, 1f)
+            assertTrue("Rail controls must remain vertical", first.bottom <= second.top)
+        }
+        val title = compose.onNodeWithTag("concept_title_0").fetchSemanticsNode().boundsInRoot
+        val bar = compose.onNodeWithTag("sentence_progress").fetchSemanticsNode().boundsInRoot
+        assertTrue(title.right < bounds.last().left)
+        assertTrue(title.bottom <= bar.top)
+        compose.onNodeWithTag("sentence_progress").assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(.5f, 0f..1f, 1)))
+        compose.onNodeWithContentDescription("Previous sentence").assertIsNotEnabled()
+        compose.runOnIdle { state.sentence = 1 }
+        compose.onNodeWithTag("sentence_count").assertTextEquals("2 / 2")
+        compose.onNodeWithContentDescription("Next sentence").assertIsNotEnabled()
+        compose.onNodeWithTag("sentence_progress").assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(1f, 0f..1f, 1)))
+        compose.onNodeWithContentDescription("Next concept").performClick()
+        compose.onNodeWithTag("sentence_count").assertTextEquals("1 / 3")
+        compose.onNodeWithTag("sentence_progress").assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(1f / 3, 0f..1f, 2)))
     }
 
     private fun player(still: Boolean = true, sentence: Int = 0): PlayerState {

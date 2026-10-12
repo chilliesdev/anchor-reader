@@ -1,6 +1,8 @@
 package com.anchorreader
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -62,6 +64,19 @@ class LibraryCardsDeviceTest {
             compose.onNodeWithContentDescription("Continue ${book.title}").performScrollTo().assertHasClickAction()
             compose.onNodeWithContentDescription("Details for ${book.title}").assertHasClickAction()
             compose.onNodeWithText("Details").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun progressTrackIsPresentForZeroPartialAndAllActualVisits() {
+        val twoUnits = units + Concept("Second topic", listOf("Another complete sentence."))
+        val examples = books.map { it.copy(units = twoUnits) }
+        val progress = mapOf(examples[0].id to Progress(), examples[1].id to Progress(visited = setOf(0)), examples[2].id to Progress(visited = setOf(0, 1)))
+        compose.setContent { AnchorTheme { LibraryScreen(examples, progress, {}, {}) } }
+        examples.forEachIndexed { index, book ->
+            scrollToBook(book)
+            compose.onNodeWithTag("book_progress_${book.id}", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(index / 2f, 0f..1f)))
         }
     }
 

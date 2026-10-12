@@ -1,4 +1,14 @@
-# Full-page concept swipe review
+# Android review
+
+## Open Design update
+
+12 October 2026. Independent Standards and Spec reviews **PASSED**, zero unresolved material findings. Reviewed final production changes and all device/JVM regressions against fixed integrated base `538ef6783b701752d5389f0c1feae5c8890e36ec`.
+
+Review covers all children #9–#25, scoped completed-session questions/answers, actual visit progress, paused reading return, autoplay and full-page gesture ownership. Narrow/large-text layouts use measured native text widths without reducing the user's text size. The overview keeps lazy per-concept rows and joined card borders; a 3,000-concept regression verifies bounded composition and last-concept persistence. No new ignore, suppression, disabled gate or timeout increase was added.
+
+Rendered UI audit and functional QA passed separately. Review does not establish physical-device or new live-provider acceptance. [Behavior and checks](OPEN_DESIGN.md), [QA results](QA_RESULTS.md).
+
+## Previous full-page concept swipe review
 
 11 October 2026. Independent review **PASSED**. Zero Standards or Spec findings. Reviewed four application/test files against base `483bc410f58a859e750b2b1bb11d6737818970b5`; diff SHA-256 `0ed00e2d54bc0bf267f893316e298efbf4a838c3854fdad775be7e6b4ee89238`.
 
