@@ -175,7 +175,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
                     Screen.CHECK -> CheckScreen(state.questions[state.questionIndex], state.questionIndex + 1, state.outcome, state.selectedAnswer, model::selectAnswer, { model.answer() }, { model.answer(true) }, model::continueAfterQuestion, model::reviewConcept, { dialog = "source" },
                         total = state.questions.size,
                         sectionTitle = state.book.units[state.questions[state.questionIndex].unitIndex].title,
-                        onRetry = model::retryQuestion)
+                        onRetry = model::retryQuestion, returnToBook = state.practiceReturnScreen == Screen.OVERVIEW)
                     Screen.FINISH -> {
                         val summary = state.currentProgress.copy(answers = state.resultAnswers)
                         FinishScreen(state.book, summary, state.questions, { model.start(state.book, 0) }, { model.navigate(Screen.LIBRARY) }, { dialog = "source" }, checkComplete = state.practiceSession.isNotEmpty())

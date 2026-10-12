@@ -350,7 +350,7 @@ fun OverviewScreen(book: Book, progress: Progress?, onStart: (Int?) -> Unit,
                     PrimaryButton(if (!book.isSample && progress?.visited.isNullOrEmpty()) "Read now" else startLabel(progress), { onStart(null) }, Modifier.fillMaxWidth())
                     OverviewActions(onTranscript, onSource)
                 }
-                if (book.pdfPath != null) PracticeCard(book, practice, { confirmTransfer = true }, onCancelQuestions, { onPractice(null) }, onManageUsage)
+                if (book.isSample || book.pdfPath != null) PracticeCard(book, practice, { confirmTransfer = true }, onCancelQuestions, { onPractice(null) }, onManageUsage, progress ?: Progress())
             }
         }
         item(key = "concepts") {
@@ -484,13 +484,13 @@ private fun OverviewAction(label: String, icon: ImageVector, onClick: () -> Unit
 @OptIn(ExperimentalLayoutApi::class)
 fun CheckScreen(question: RecallQuestion, number: Int, outcome: Outcome?, selected: Int?, onSelect: (Int) -> Unit,
     onSubmit: () -> Unit, onSkip: () -> Unit, onContinue: () -> Unit, onReview: () -> Unit, onSource: () -> Unit,
-    total: Int = 0, sectionTitle: String = "", onRetry: () -> Unit = {}) {
+    total: Int = 0, sectionTitle: String = "", onRetry: () -> Unit = {}, returnToBook: Boolean = false) {
     PageColumn(gap = 16, scrollKey = question) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.align(Alignment.CenterVertically)) {
                 Eyebrow(if (total > 0) "QUESTION $number OF $total" else "CHECK / ${number.toString().padStart(2, '0')}")
             }
-            TextButton(onReview, modifier = Modifier.heightIn(min = 48.dp).align(Alignment.CenterVertically)) { Text(if (total > 0) "Continue reading" else "Review") }
+            TextButton(onReview, modifier = Modifier.heightIn(min = 48.dp).align(Alignment.CenterVertically)) { Text(if (returnToBook) "Back to book" else if (total > 0) "Continue reading" else "Review") }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(sectionTitle.ifBlank { question.prompt }, fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })

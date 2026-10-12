@@ -2,6 +2,18 @@
 
 Issue [#8](https://github.com/chilliesdev/anchor-reader/issues/8) tracks 17 final changes. Native implementation uses the exact 11 October 2026 [design export](https://github.com/chilliesdev/anchor-reader/blob/8f70e4aac64a7cd39e7f297bddb48180b5802750/design/open-design/index.html). Pink marks and dashed outlines are annotations.
 
+Issue [#28](https://github.com/chilliesdev/anchor-reader/issues/28) adds the 12 October 2026 [design export](https://github.com/chilliesdev/anchor-reader/blob/db38fab82662650c2c271bf56152df0831240f4a/design/open-design/index.html). It preserves the earlier player, source, account and generation flows.
+
+| Issues | Added behavior |
+| --- | --- |
+| #29 | Concepts without a diagram use text alone. Real sample diagrams remain unless sentence fitting needs their space. |
+| #30 | Measured native text fits the middle player area. Diagram height, gaps and font size adapt before exact display parts appear. Parts preserve every source character and keep the sentence count, saved position, visits and complete narration. Book/concept/sentence changes reset parts; viewport/font changes refit and clamp the selection. Vertical text swipes move the whole concept page directly. |
+| #31 | Sample/PDF overviews show a bordered Practice questions card above Concepts. Saved questions and correct/wrong/skipped answers determine counts, distinct concept coverage and Start/Continue/Practice again actions. |
+| #32 | Native task state drives Not ready/Generating/Ready, progress announcements and task details. Partial questions stay usable. Add confirmation, sign-in, cancellation, retry, usage and offline access remain. |
+| #33 | Overview practice starts at the first unanswered saved question, or question one when all have answers. Back to book and final Complete return to that overview. Player checks keep Continue reading and Complete-to-Results. Repeating does not clear answers or add reading visits. |
+
+For #28 local reproduction, also run `OpenDesignDeviceTest`, `SmallLandscapeFitDeviceTest`, `PracticeJourneyDeviceTest` and `PlayerSwipeDeviceTest`. They cover real rendered display parts, native practice card states, PDF/sample persistence, overview return, and existing player return/results. Synthetic question/provider fixtures do not prove live sign-in, billing or response quality. The final independent rendered audit and review passed. Local checks passed: 201 JVM tests, zero lint errors/15 existing warnings, normal native QA 83 passed/1 skipped, narrator QA 1 passed/1 skipped, three synthetic generation journeys and 15 release-script tests. The two voice-dependent skips and three unavailable Chrome grant cases are not passes. Physical devices, spoken TalkBack, acoustic output and current live-provider acceptance remain unverified.
+
 ## Screens
 
 | Issues | Behavior |
