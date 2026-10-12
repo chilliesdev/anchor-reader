@@ -10,11 +10,11 @@ This skill orchestrates multi-agent task execution while keeping the **Orchestra
 > [!IMPORTANT]
 > **Dynamic Sub-Agent Model Selection**:
 >
-> - **Orchestrator Agent**: Operates on the most capable model (`pro` / top-tier model) for high-level decision-making and phase transitions.
-> - **Sub-Agent Model Determination**: The Orchestrator dynamically decides the optimal model (`flash_lite`, `flash`, or `pro`) when invoking each sub-agent via `invoke_subagent`, based on task complexity:
->   - `flash_lite`: Lightweight tasks (e.g. pre-flight checks, simple lookups, standard reviews).
->   - `flash`: Moderate coding, QA testing, and doc updates.
->   - `pro`: Complex refactoring, deep architectural changes, or intricate release pipelines.
+> - **Orchestrator Agent**: Operates on the most capable model (`gpt-6-astra` / top-tier model) for high-level decision-making and phase transitions.
+> - **Sub-Agent Model Determination**: The Orchestrator dynamically decides the optimal model (`gpt-6-luna`, `gpt-6.1-sol`, or `gpt-6-astra`) when invoking each sub-agent via `invoke_subagent`, based on task complexity:
+>   - `gpt-6-luna`: Lightweight tasks (e.g. pre-flight checks, simple lookups, standard reviews).
+>   - `gpt-6.1-sol`: Moderate coding, QA testing, and doc updates.
+>   - `gpt-6-astra`: Complex refactoring, deep architectural changes, or intricate release pipelines.
 
 > [!IMPORTANT]
 > **Project Skill Locality**:
@@ -107,7 +107,7 @@ Example request: "To test this feature locally in Phase 4, I need a sandbox prov
 
 ### Phase 1: Implementation
 
-1. Orchestrator evaluates task scope and selects appropriate sub-agent model (`flash_lite`, `flash`, or `pro`).
+1. Orchestrator evaluates task scope and selects appropriate sub-agent model (`gpt-6-luna`, `gpt-6.1-sol`, or `gpt-6-astra`).
 2. Orchestrator launches **Implementation Sub-Agent** via `invoke_subagent`.
 3. Sub-Agent executes changes in isolated workspace, writes summary to `.tmp/CHANGES.md`, and returns concise result: `STATUS: COMPLETE | File: .tmp/CHANGES.md`.
 4. Before returning, the Sub-Agent runs `npm run format` and `npm run lint`. Both must pass. It fixes violations in the code; it never adds ignores, `eslint-disable` comments, or suppressions.
