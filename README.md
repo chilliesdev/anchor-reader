@@ -1,116 +1,96 @@
 # AnchorReader for Android
 
-A native Android reader based on the supplied original design. Kotlin and Jetpack Compose implement the screens. Books, progress, source files, preferences and saved practice stay on the device. Optional question generation sends selected section text to OpenAI through the user's ChatGPT connection.
+Read a book one sentence at a time. Listen with an offline device voice. Check your understanding with saved practice questions.
 
-## Open Design update
+AnchorReader is a native Android app built with Kotlin and Jetpack Compose. Books, source files, reading positions and practice answers stay on your device. Reading needs no account. You can connect ChatGPT to add optional questions to an imported PDF.
 
-12 October 2026. All 17 changes from [issue #8](https://github.com/chilliesdev/anchor-reader/issues/8) and children #9–#25 are implemented. Library cards are compact. Overview groups reading actions and concept states. The Player has a lower-right icon rail, sentence controls beside Play, a bottom title and visible video. Quick check uses the concept title; final Complete opens grouped results without marking unread concepts visited. Narrow screens and large text keep full labels and summary words readable. See [screen behavior and checks](docs/OPEN_DESIGN.md).
+[Download the signed APK](https://github.com/chilliesdev/anchor-reader/releases/latest) · [Release details](docs/RELEASES.md) · [Media and dependency credits](docs/CREDITS.md)
 
-Earlier issue #8 independent rendered UI audit and code review passed. Its local build/lint and 194 JVM tests passed, with zero test failures/errors/skips and zero lint errors. All 82 native cases have passing evidence: the full run passed 79 and failed three Chrome first-run setup cases; those same three passed after signed-out browser setup. This was two runs, not one clean 82-test run. No live provider request was made. Physical phones, spoken TalkBack and acoustic output remain unverified. GitHub CI and signed publication are checked separately for the delivered commit.
+## App screenshots
 
-Issue [#28](https://github.com/chilliesdev/anchor-reader/issues/28) adds text-only concepts, exact sentence display parts and the sample/PDF Practice questions card with start, resume and repeat actions. The final independent UI audit and code review passed. Current local checks passed: 201 JVM tests, zero lint errors and 15 existing warnings; normal native QA 83 passed/1 skipped; narrator QA 1 passed/1 skipped; three synthetic generation journeys and 15 release-script tests passed. The two voice-dependent skips remain explicit. Three Chrome-specific grant cases could not run on the AOSP emulator. Physical devices, spoken TalkBack, acoustic output and live provider acceptance for this change remain unverified. CI and signed publication are checked separately for the delivered commit.
+These are real app screens captured on 14 October 2026. They use the bundled sample lesson on an Android emulator. No account or AI request was used. See [capture details](docs/screenshots/README.md).
 
-## Read and practise
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/library.png" width="240" alt="Library with the bundled offline web caching lesson"><br><b>Library</b><br>Open a book or add your own.</td>
+    <td align="center"><img src="docs/screenshots/overview.png" width="240" alt="Book overview with reading actions, practice questions and concepts"><br><b>Book overview</b><br>Continue reading or choose a concept.</td>
+    <td align="center"><img src="docs/screenshots/player.png" width="240" alt="Reading player with a complete sentence and workshop video background"><br><b>Player</b><br>Read, listen and move between concepts.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/quick-check.png" width="240" alt="Quick check with a sample multiple-choice question"><br><b>Quick check</b><br>Practise the current concept.</td>
+    <td align="center"><img src="docs/screenshots/results.png" width="240" alt="Check results with saved sample answers"><br><b>Results</b><br>Review correct and skipped answers.</td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="240" alt="Settings with ChatGPT connection, device narration and local progress controls"><br><b>Settings</b><br>Manage narration, connection and progress.</td>
+  </tr>
+</table>
 
-- Create a book from text or import a digital PDF through the Android file picker.
-- Read one complete sentence at a time. Source sections form concepts, including sections across PDF pages.
-- Start offline device narration from a book, Continue or a concept. Swipe up/down to change concept. The entire page follows your finger: background, video, header, artwork, text, actions and footer. It snaps into place after release. Pause, change speed or use still mode.
-- Open the retained original PDF, lesson outline or full text. PDF cards show its original first page.
-- On each new PDF import, **Add practice questions** starts off. Save without it to read locally.
-- Turn it on to save the book, then connect to ChatGPT. The form explains that section text goes to OpenAI and uses the connected ChatGPT plan. Cancellation or an error keeps the saved book readable.
-- Add questions later from book Details. No new upload is needed. The app saves up to three multiple-choice questions per section; short sections can have fewer.
-- Open Practice questions from the sample or PDF book overview. Start at the first unanswered question. Correct, wrong and skipped answers count as answered. Practice again keeps saved answers until you answer again. Back to book and final Complete return to the overview.
-- Open Quick check from the player to practise that concept. Continue reading restores the same reading sentence with narration paused; final Complete opens the check results.
-- Ready questions and answers work offline. Incomplete sections retain an explicit retry action. Cancel, restart, sign-out and deletion preserve safe reading state.
-- Settings has the ChatGPT connection, sign-out and Manage usage. No provider/model picker or API key is required. A damaged local connection can be reset after confirmation; books and practice remain.
-- Save/resume reading, inspect storage, clear progress or delete imported books and sources. Clearing progress also clears answers; saved questions remain.
-- Prepared sample lesson, media, diagram and authored recall checks remain available.
+## What you can do
+
+- Create a book from text or import a digital PDF with the Android file picker.
+- Use the Library and book overview to start, continue or review a book. Choose a concept from its outline.
+- Read complete sentences. Use sentence controls, or swipe up and down to change concepts. Long sentences use exact display parts when needed.
+- Listen with an installed offline English voice. Pause narration, change speed or use a still background. The Player also has a silent workshop video background.
+- Open the original PDF, full text or lesson outline. PDF cards use the original first page as their cover.
+- Use the bundled lesson, diagram and authored recall checks without a connection.
+- Start, resume or repeat saved practice from the book overview. Open Quick check from the Player. Review feedback and grouped results.
+- Keep reading positions and answers across app restarts. Inspect storage, clear progress or delete imported books. Clearing progress removes answers but keeps books and saved questions.
+
+## Optional practice questions
+
+For a PDF import, **Add practice questions** is off by default. Save the book first, then connect to ChatGPT if you want questions. You can also add questions later from the book overview.
+
+Generation sends selected section text to OpenAI and needs internet access plus a ChatGPT account with the required plan access. The app uses browser sign-in and Android Keystore to protect saved credentials. No API key or model picker is needed. Settings includes sign-out and Manage usage.
+
+The app saves up to three multiple-choice questions per section. Short sections can have fewer. It checks the response format and quoted source before saving. These checks do not guarantee answer accuracy or teaching quality; check the source. Failed or cancelled generation keeps the saved book readable. Incomplete sections have a retry action. Saved questions and answers work offline.
 
 ## Source and offline limits
 
-Section detection uses source headings, font differences and PDF bookmarks. Sections can span paragraphs/pages. A source without clear section evidence becomes one `Full document` concept. This does not generate summaries. Each complete sentence remains one reading step, even when long. Narration stops at the final sentence of a concept; source/transcript dialogs and background return stay paused.
-
-Concept pages fill the player and have no gap. A drag moves the entire page and shows the adjacent concept with its own background, header, artwork, text, actions, count and footer. Moving and preview controls cannot trigger an action. A preview does not change saved progress or start speech. When the page settles, the selected concept starts at sentence one and requests autoplay once. A fast fling moves at most one page. Short, reversed, horizontal or cancelled gestures keep the current concept; the first and last concepts have no wrap. Sentences fit the middle area with native font scaling. If a complete sentence cannot fit at the readable font floor, Back/Next display its exact parts. Parts keep one sentence, its reading position, and its complete narration. A swipe over text changes concept directly. Concepts without diagrams use text alone. Swipes do not open a quiz or finish screen. Next, Previous and the outline keep the page and reading state in step.
-
-PDF extraction can change reading order; check the original source. An image-only first-page cover is accepted with digital body text. Scanned body pages, encrypted and damaged PDFs return an error. Maximum input: 25 MiB, 200 pages and one million text characters. No OCR or cloud conversion is included. A missing original PDF cannot be rebuilt from extracted text.
-
-Reading, source views, saved questions/answers and bundled media work offline. Narration needs an installed offline English device voice. If unavailable, the player explains the issue; text stays readable. The app does not select a network voice silently. New questions require internet access and a ChatGPT account with the required plan access.
-
-## Optional ChatGPT connection
-
-This preview uses this app's own system-browser sign-in. It does not use the desktop Codex connection. OAuth uses PKCE, a local callback and verified identity. Protected credentials use Android Keystore and private storage excluded from backup. Sign-out clears local credentials and attempts remote revocation; Manage usage remains available if that cannot be confirmed. Lost sign-in after process exit needs a fresh attempt.
-
-The local callback listener now ignores an empty, reset or incomplete browser connection and waits for the valid callback within the same overall deadline. The browser return page says verification is pending; it does not report success before identity checks and protected storage finish. Sign-in failures show a fixed safe action in the app. State, PKCE and signed identity checks remain required.
-
-Controlled sign-in QA passed on Android 15 with native Chrome: browser return during held token exchange, activity recreation, rotation, cancellation and a fresh attempt after real process loss. Three native error cases and three transport/security/storage cases also passed. These tests used synthetic signed identities and isolated storage. They reproduce the app's interrupted-socket fault; they do not prove the precise Redmi cause or real OpenAI account sign-in. Current-main integration retained identical authentication files and passed 192 JVM tests, review, build/lint and a separate default-app startup/Settings smoke. An extra healthy-Chrome return repeat remained blocked by emulator/browser setup. Signed public update and Redmi acceptance are separate checks. See [sign-in checks and limits](docs/PHONE_SIGNIN.md).
-
-The app asks for a completed structured response and checks each question's choices, answer and quoted source locally. Source pages come from the retained local spans. These checks cannot prove teaching quality or that an answer is correct in every context; check the source. Failed, partial, refused or invalid responses do not become questions. No automatic generation retry or API-funded fallback occurs.
-
-Authentic ChatGPT acceptance of the recovery patch passed on 11 October 2026 with the authorized account, public River Guide and a cap1 diagnostic APK on an API37 emulator. Six source-valid questions were saved across two READY sections. Source pages and all answer keys, native correct/wrong feedback, offline practice and persistence after a real process restart passed. This result covers that account, fixture and emulator. It was collected before concept-swipe integration. Other accounts/models, physical Android browser return and provider billing remain unverified. The upstream cause of the empty terminal output remains unknown.
-
-Earlier diagnostic test on 11 October 2026, before this repair: genuine sign-in passed, but the final test **failed** on the separate cap1 test APK. One first-section invocation reached HTTP 200 but was rejected at `output_empty`; zero questions were saved and zero of two sections were ready. Source review maps this fixed category to a present empty completed-output array. At that point, the cause was unknown and no deterministic local fix had been found. The captured `media=missing` category does not prove the wire header was absent. [Measured failure](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/LIVE_QA_REPORT.md), [independent audit](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/INDEPENDENT_OUTCOME_AUDIT.md), [finding](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/EMPTY_OUTPUT_FINDING.md).
-
-Earlier diagnostic-only preview on 11 October 2026: fixed diagnostic categories retained the earlier acceptance rules. Its separate two-request/six-question grant used two app-level invocations and at most six requested questions, both failures. That grant was exhausted. Full-book completion, live answer/source quality and offline use of live questions were not proved by those earlier tests. [Historical accounting](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/LAST_CALL_ACCOUNTING.json), [historical handoff](reports/chatgpt-live-20261011/current/CURRENT_HANDOFF.md).
+- Android 8.0/API 26 or later is required.
+- PDFs must be no more than 25 MiB, 200 pages and one million text characters. Scanned body pages, encrypted files and damaged files are not supported. An image-only cover can accompany digital body text. There is no OCR.
+- Concepts follow source headings, font differences and PDF bookmarks. Without clear section evidence, the book has one `Full document` concept. The app does not create summaries.
+- PDF extraction can change reading order. Check the retained original. A missing original PDF cannot be rebuilt from extracted text.
+- Reading, retained sources, saved practice and bundled media work offline. Narration needs an installed offline English voice; text stays available if the voice is missing.
+- New questions need a connection. Physical-device sign-in, spoken accessibility and acoustic output need separate checks. Emulator screenshots do not verify these.
 
 ## Build and run
 
-Requirements: Android Studio, JDK 17 or 21, Android SDK 35, Android 8.0/API 26 or later. Gradle/dependencies are pinned; the first build needs internet access. Open this directory in Android Studio, sync, select `app`, then Run.
+Install Android Studio, JDK 17 or 21 and Android SDK 35. The first build needs internet access for pinned Gradle dependencies. Open this directory in Android Studio, sync, select `app`, then Run.
+
+Or use the command line:
 
 ```sh
-./scripts/build.sh
+./scripts/build.sh :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n com.anchorreader/.MainActivity
 ```
 
-The script can use Android Studio's bundled JDK on macOS. Set `JAVA_HOME` and `ANDROID_HOME` for another installation. `local.properties` is machine-specific.
+The build script can use Android Studio's bundled JDK on macOS. Set `JAVA_HOME` and `ANDROID_HOME` for another installation. Keep machine-specific SDK paths in untracked `local.properties`. If more than one device is connected, pass `-s DEVICE_SERIAL` to each `adb` command.
 
-## Local files and validation
-
-The links in this section refer to local build and QA files. These files are not included in the public repository. Build the app with the commands above.
-
-Full-page swipe preview before current-main integration: [signed APK](artifacts/AnchorReader-full-page-swipe-preview-20261011.apk), SHA-256 `708d78a1f05574e1a2a9437b9fbbdc225ef373b7013934f455a0efdecab8d370`; [unsigned AAB](artifacts/AnchorReader-full-page-swipe-preview-20261011-unsigned.aab), SHA-256 `290603c009f6249b73d5d946b23bd32d7695bfd8880dda61d781c7e19f9b2a04`. The entire page moves in still and video modes. Independent UI audit and review passed. Final full device run passed 60/60 with zero skips. Native build passed: 141 JVM tests, zero lint errors and 15 existing warnings. Signed optimized APK install, whole-page still/video smoke, v2/v3 signature, 16 KiB alignment and installed-byte equality passed. Earlier failed runs and their diagnoses remain in the [QA report](reports/full-page-swipe-preview-20261011/QA_REPORT.md). See the [release handoff and durable evidence](reports/full-page-swipe-preview-20261011/release/HANDOFF.md). Prior preview/demo files and checksum entries are preserved. This APK and its 141-JVM/60-device gates predate the generation-recovery and OAuth-page changes now on main. Combined-source checks are recorded separately.
-
-Concept swipe preview before the generation-recovery merge: [signed APK](artifacts/AnchorReader-concept-swipe-preview.apk), SHA-256 `dd9e46e270d0b72342e07a6b76cc6c236612e012dd954ce9fea72497c4706894`; [unsigned AAB](artifacts/AnchorReader-concept-swipe-preview-unsigned.aab), SHA-256 `73f69010394b3006544393878a731ab1c41291d67e51fc82acf8c5abfce576f3`. Local build, 141 JVM tests, lint, 58 device tests and signed APK install/smoke passed. One initial storage-test timeout passed in an isolated retry and a complete unchanged-APK retry; its cause remains unknown. The independent rendered audit passed at phone 411dp, narrow 320dp, tablet 800dp, landscape and 200% font. Both immediate still-mode tap/swipe directions passed. Signature, development certificate, 16 KiB alignment and installed-byte equality passed. [Complete handoff and evidence](reports/concept-swipe-preview-20261011/release/HANDOFF.md).
-
-That swipe preview was built before the generation recovery described above. It preserves prior demo artifacts and their acceptance status. No provider request was made for swipe QA. Physical phone touch feel, measured frame rate, spoken TalkBack and acoustic narration remain unverified. See [swipe test plan](docs/QA_PLAN.md) and [swipe preview results](docs/QA_RESULTS.md).
-
-Earlier diagnostic preview on 11 October 2026, before this repair: [signed normal default0 APK](artifacts/AnchorReader-pdf-questions-stream-diagnostics-default0-20261011.apk), SHA-256 `ab33d927b051483019c5a15defd0d81e8bf8f1ce7481e9000d86edff54c08a02`. [Unsigned preview AAB](artifacts/AnchorReader-pdf-questions-stream-diagnostics-default0-20261011-unsigned.aab). The separate [cap1 test APK](artifacts/AnchorReader-pdf-questions-stream-diagnostics-cap1-20261011.apk), SHA-256 `d1a70012df7ea3e426c875b751c179cdcecbaa63e4bbb2e32786b4ed124b75c4`, was used for the failed final bounded test. Those signed local previews did not pass live question generation. After the test, normal Sign out removed the local connection. Remote revocation is app-reported only. Exact normal0 bytes were installed with data retained; the original PDF was readable and import questions were OFF. The owned emulator was stopped; its private AVD and evidence remain. Cleanup used zero extra Responses invocations. [Cleanup proof](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/CLEANUP_REPORT.md), [independent cleanup audit](reports/chatgpt-live-20261011/stream-branch-diagnostics/live/INDEPENDENT_CLEANUP_AUDIT.md), [final handoff](reports/chatgpt-live-20261011/stream-branch-diagnostics/final/FINAL_HANDOFF.md). No store submission or accepted demo replacement.
-
-Earlier optional-question [preview APK](artifacts/AnchorReader-pdf-questions-preview.apk) and [unsigned preview AAB](artifacts/AnchorReader-pdf-questions-preview-unsigned.aab) remain unchanged. The AAB needs a release key for store use.
-
-The prior [demo APK](artifacts/AnchorReader-demo.apk) and [unsigned release AAB](artifacts/AnchorReader-release-unsigned.aab) remain unchanged. They contain the earlier section/swipe release and do not contain this ChatGPT flow. See [all file hashes](artifacts/SHA256SUMS).
-
-Recovery-patch validation before concept-swipe integration: **178 JVM tests and 62 isolated native device tests passed**, with zero failures or skipped tests. Android lint has zero errors and nine warnings. Independent code review and the native UI audit passed. Generation/save/error, source checks, persistence and offline fixtures use the actual ViewModel and repositories. The normal default0 local release APK passed signature, alignment, installation and app-open checks. Authentic generation used the separate cap1 diagnostic build described above. GitHub build/test/lint checks and public signed releases are verified separately against their exact source commit. These 178 JVM and 62 device results refer to that earlier recovery build; combined device QA is separate.
-
-Earlier diagnostic gates: **141 distinct JVM tests passed per mode**, zero failures/errors/skips, 13 suites. Both configurations run the same 141 methods. Default0 full native debug/release APK and bundle gates passed; separate optimized cap1 release passed. Lint has zero errors and 15 unchanged warnings. All 75 reviewed source files matched; independent code review found zero Standards/Spec issues. Release constants, compiled constructors, signatures and 16 KiB alignment passed for both APKs. UI-impact audit was skipped: diagnostic changes do not change the UI. This is not a new rendered-UI or live acceptance pass. No new complete ReaderViewModel save/error fixture is claimed. [Local gates](reports/chatgpt-live-20261011/stream-branch-diagnostics/local/gates-summary.json), [independent release verification](reports/chatgpt-live-20261011/stream-branch-diagnostics/release/INDEPENDENT_ARTIFACT_VERIFICATION.md), [earlier evidence](reports/chatgpt-live-20261011/current/CURRENT_HANDOFF.md).
-
-Historical optional-feature QA: 52 unique device methods have passing evidence from an initial 51/52 run plus the corrected four-method class, with three overlaps. This was not one clean 52-test run. That earlier 52-method suite was not repeated on the earlier diagnostic APK. Prior rendered UI audit and practice fixture evidence remain in the [earlier preview report](reports/pdf-questions-preview-20261011/HANDOFF.md) and [UI/process screenshots](reports/pdf-questions-preview-20261011/UI_EVIDENCE.md). [Original test plan](docs/QA_PLAN.md), [historical QA](docs/QA_RESULTS.md), [UI audit](docs/UI_AUDIT.md), [review](docs/REVIEW.md).
+## Validation
 
 ```sh
 ./scripts/build.sh :app:testDebugUnitTest :app:lintDebug
-ANDROID_SERIAL=emulator-5596 ./scripts/qa.sh device
+ANDROID_SERIAL=YOUR_TEST_EMULATOR ./scripts/qa.sh device
 ```
 
-Use a separate test emulator; device tests clear its app data. Select its actual serial. Tests include import/sections, full sentences, autoplay/pause/swipes, cards/covers, migration, storage, source/reading return, practice persistence/task fences, reset races, Keystore and provider protocol security. Fixture practice states are labeled in evidence. See [QA plan](docs/QA_PLAN.md).
+Use a separate test emulator: device tests clear app data. The device command builds and installs the app and instrumentation tests. See the [QA plan](docs/QA_PLAN.md) for test scope. Historical checks are recorded in [QA results](docs/QA_RESULTS.md), [design notes](docs/OPEN_DESIGN.md) and [phone sign-in checks](docs/PHONE_SIGNIN.md); each report has its own revision and limits.
 
-Physical phones, spoken TalkBack, other Android API levels, screen-lock/audio-focus interactions and acoustic speaker quality remain unverified. Emulator checks do not replace these checks.
+## Releases and signing
 
-## Signing
-
-Public signed APKs, signed AABs, checksums and change notes are published to [GitHub Releases](https://github.com/chilliesdev/anchor-reader/releases) after checks pass for each new `main` push. See [release setup, versions and safe reruns](docs/RELEASES.md). Existing local previews use a different signing certificate; keep needed books/progress and original sources before planning a migration. Uninstalling removes local data.
+Each successful `main` push publishes a signed APK and AAB after that commit's checks pass. [GitHub Releases](https://github.com/chilliesdev/anchor-reader/releases) includes source metadata, checksums and change notes. Install the APK; the AAB is for distribution tools. See [versions, signing setup and safe reruns](docs/RELEASES.md).
 
 ```sh
 ./scripts/build.sh :app:assembleRelease :app:bundleRelease
 ```
 
-Without signing variables, these are unsigned. For a store release, set `ANCHOR_KEYSTORE`, `ANCHOR_STORE_PASSWORD`, `ANCHOR_KEY_ALIAS` and `ANCHOR_KEY_PASSWORD` to your own key. Keep keys/passwords outside source control. For local delivery, align/sign the optimized APK with SDK tools and the existing external development key; verify its signature and installation. Signing keys and passwords must stay outside Git. Local APKs, bundles, QA reports and screenshots are excluded from the public repository.
+Local release builds are unsigned unless signing is configured. Set `ANCHOR_KEYSTORE`, `ANCHOR_STORE_PASSWORD`, `ANCHOR_KEY_ALIAS` and `ANCHOR_KEY_PASSWORD` for your own release key. Keep keys and passwords outside Git. Older local previews use a different certificate from public releases; preserve needed data before migration. Uninstalling removes local data.
 
-## Structure
+## Project structure
 
-- `ReaderViewModel`: navigation, reading/practice/account state, ordered writes and lifecycle fences.
-- `data/`: source sections/spans, bounded PDF/text extraction, atomic book/practice storage and question validation.
-- `chatgpt/`: OAuth, protected credentials, fixed HTTPS transport, identity verification and completed streaming output.
-- `ui/`: native screens, optional import, practice and account controls.
-- `Narrator`, `PlayerScreen`, `SourceDialog`: offline speech, local media and retained source views.
+- `app/src/main/java/com/anchorreader/`: app entry point, reading state, narration and source views.
+- `data/`: text/PDF extraction, source sections, book storage and practice validation.
+- `chatgpt/`: browser sign-in, protected credentials and provider transport.
+- `ui/`: Library, book overview, import, practice and Settings screens.
+- `scripts/`: build, device QA and GitHub release tools.
+- `docs/`: design, QA, release and attribution notes; README screenshots.
 
-The native Android request supersedes the older PWA report. No measured learning benefit or automatic AI narration is claimed. See [media/dependency credits](docs/CREDITS.md).
+This repository contains the native Android app. The bundled lesson explains web caching; it does not make AnchorReader a web app. No measured learning benefit is claimed.
