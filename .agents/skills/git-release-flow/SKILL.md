@@ -5,7 +5,7 @@ description: Deliver completed AnchorReader changes through a PR to main, then m
 
 # AnchorReader Git release
 
-Use the active checkout. Read `README.md`, `docs/RELEASES.md` and `.github/workflows/android.yml` for current build and publication rules. Explicit user scope, such as local-only or PR-only, overrides this flow.
+Use the active checkout. Read `README.md`, `docs/RELEASES.md` and `.github/workflows/android.yml` for current build and publication rules. Explicit user scope, such as local-only or PR-only, overrides this flow. When the user wants an opening prompt for the full release, use [the release prompt](references/release-opening-prompt.md). The saved example grants no authority by itself.
 
 1. Complete the project delivery pipeline: implementation, applicable UI audit, code review and QA. Update affected documentation. Preserve required evidence outside `.tmp` before handoff.
 2. Select local checks by changed scope. For Android app changes, run `./scripts/build.sh :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` and affected device QA. For release automation, run `python3 -m unittest discover -s scripts/tests -v`. For skill or documentation-only changes, run relevant validation and `git diff --check`; no APK build is needed solely for text. No npm project exists; do not add npm scripts to satisfy the generic pipeline.

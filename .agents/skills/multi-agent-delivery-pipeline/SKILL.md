@@ -8,13 +8,10 @@ description: Lean orchestrator managing sequential sub-agents for local QA prefl
 This skill orchestrates multi-agent task execution while keeping the **Orchestrator Agent's context window ultra-lean**.
 
 > [!IMPORTANT]
-> **Dynamic Sub-Agent Model Selection**:
+> **Host Tools and Model Selection**:
 >
-> - **Orchestrator Agent**: Operates on the most capable model (`gpt-6-astra` / top-tier model) for high-level decision-making and phase transitions.
-> - **Sub-Agent Model Determination**: The Orchestrator dynamically decides the optimal model (`gpt-6-luna`, `gpt-6.1-sol`, or `gpt-6-astra`) when invoking each sub-agent via `invoke_subagent`, based on task complexity:
->   - `gpt-6-luna`: Lightweight tasks (e.g. pre-flight checks, simple lookups, standard reviews).
->   - `gpt-6.1-sol`: Moderate coding, QA testing, and doc updates.
->   - `gpt-6-astra`: Complex refactoring, deep architectural changes, or intricate release pipelines.
+> - Keep the current orchestrator model. Select workers from models supported by the active host and delegation tool. Preserve this project's preferred mapping when supported: `gpt-6-luna` for simple checks, `gpt-6.1-sol` for routine implementation and QA, and `gpt-6-astra` for complex design or release work. If a preferred model is unavailable, use a supported equivalent or inherit the parent model and state the fallback. Inherit the parent model when no override is needed.
+> - Use the active host's delegation API and documented arguments. In Codex, use `collaboration.spawn_agent`, `followup_task`, `send_message`, and `wait_agent` when available. Follow the tool's model and context-fork restrictions. Do not invent tool names or parameters, or create user-owned chats as pipeline workers. If delegation is unavailable, report the blocked phase.
 
 > [!IMPORTANT]
 > **Project Skill Locality**:
@@ -25,7 +22,7 @@ This skill orchestrates multi-agent task execution while keeping the **Orchestra
 >
 > 1. **Zero Direct Inspection/Coding**: The Orchestrator MUST NOT inspect codebase files, read large outputs, or edit code directly.
 > 2. **File-Based State Passing**: Sub-agents communicate details via temporary directory workspace files (e.g., `.tmp/PREREQUISITES.md`, `.tmp/UI_AUDIT.md`, `.tmp/REVIEW_FEEDBACK.md`, `.tmp/QA_REPORT.md`), returning ONLY status flags and file pointers to the Orchestrator.
-> 3. **Isolated Workspaces**: Use `Workspace: "branch"` or `Workspace: "share"` in `invoke_subagent` to isolate sub-agent work environments.
+> 3. **Workspaces**: Workers share files unless the host provides an isolated checkout. Reuse a suitable task checkout; create isolation when needed. Pass the exact checkout and evidence paths to each worker. Preserve unrelated changes. Before checking out of `main` or `master`, pull the latest changes successfully.
 > 4. **Git Isolation**: Pipeline state files in the temporary directory (`.tmp/`) MUST NEVER be committed to Git at any point.
 > 5. **Single Sub-Agent Execution**: At no point should two sub-agents be running concurrently or simultaneously. Each phase MUST be fully completed and verified before the Orchestrator launches the next sub-agent; strictly one sub-agent may be active at any time.
 
@@ -107,10 +104,10 @@ Example request: "To test this feature locally in Phase 4, I need a sandbox prov
 
 ### Phase 1: Implementation
 
-1. Orchestrator evaluates task scope and selects appropriate sub-agent model (`gpt-6-luna`, `gpt-6.1-sol`, or `gpt-6-astra`).
-2. Orchestrator launches **Implementation Sub-Agent** via `invoke_subagent`.
-3. Sub-Agent executes changes in isolated workspace, writes summary to `.tmp/CHANGES.md`, and returns concise result: `STATUS: COMPLETE | File: .tmp/CHANGES.md`.
-4. Before returning, the Sub-Agent runs `npm run format` and `npm run lint`. Both must pass. It fixes violations in the code; it never adds ignores, `eslint-disable` comments, or suppressions.
+1. Orchestrator evaluates task scope and selects a supported sub-agent model under **Host Tools and Model Selection**.
+2. Orchestrator launches **Implementation Sub-Agent** with the active host's delegation tool.
+3. Sub-Agent executes changes in the assigned task checkout, writes summary to `.tmp/CHANGES.md`, and returns concise result: `STATUS: COMPLETE | File: .tmp/CHANGES.md`.
+4. Before returning, run the applicable project-native format, lint, and test checks from preflight. Apply project `AGENTS.md` and release gates before committing. For skill or documentation-only changes, use relevant text validation unless project rules require more. Do not impose npm commands on a project that uses another build system. Fix violations; never add ignores, `eslint-disable` comments, or suppressions to pass a check.
 
 ---
 
@@ -136,8 +133,8 @@ Run immediately after implementation whenever the change affects rendered UI, co
 
 ### Phase 3: Code Review (via `code-review` Skill)
 
-1. Orchestrator determines review complexity, selects model tier, and launches **Code Review Agent** via `invoke_subagent`, explicitly loading and executing the project-local `.agents/skills/code-review/SKILL.md`.
-2. Code Review Agent audits diffs directly in workspace and writes findings to `.tmp/REVIEW_FEEDBACK.md` following `code-review` skill guidelines. A change that adds `.prettierignore` entries, `eslint-disable` comments, or `eslint-suppressions.json` entries fails review.
+1. Orchestrator determines review complexity, selects model tier, and launches **Code Review Agent** with the active host's delegation tool, explicitly loading and executing the project-local `.agents/skills/code-review/SKILL.md`.
+2. Pass this constraint explicitly to the Code Review Agent: inspect both Standards and Spec in sequence; do not launch concurrent child agents, even if the review skill suggests parallel work. The agent audits diffs directly in the checkout and writes findings to `.tmp/REVIEW_FEEDBACK.md` following the other `code-review` guidelines. A change that adds `.prettierignore` entries, `eslint-disable` comments, or `eslint-suppressions.json` entries fails review.
 3. Code Review Agent returns concise response: `STATUS: PASSED` or `STATUS: FAILED | File: .tmp/REVIEW_FEEDBACK.md`.
 4. **Loop Evaluation**:
    - **FAILED**: Orchestrator launches new **Coding Sub-Agent** (model selected per feedback scope) pointing to `.tmp/REVIEW_FEEDBACK.md`. Recheck Phase 2 for UI impact from the fix, then repeat Phase 3. A fix without UI impact may retain the prior UI audit result; a UI-affecting fix must be audited again.
@@ -147,8 +144,8 @@ Run immediately after implementation whenever the change affects rendered UI, co
 
 ### Phase 4: QA Verification (via `e2e-qa-tester` Skill)
 
-1. Orchestrator selects model tier and launches **QA Agent** via `invoke_subagent`, explicitly loading and executing the project-local `.agents/skills/e2e-qa-tester/SKILL.md`.
-2. QA Agent reads `.tmp/PREREQUISITES.md` and uses its local setup and test plan to execute end-to-end user simulation and QA verification via the `e2e-qa-tester` skill. Carry the local scope into that skill; do not default to staging. If implementation adds test requirements, update the report and resolve them before QA.
+1. Orchestrator selects model tier and launches **QA Agent** with the active host's delegation tool, explicitly loading and executing the project-local `.agents/skills/e2e-qa-tester/SKILL.md`.
+2. QA Agent reads `.tmp/PREREQUISITES.md` and uses its local setup and test plan to execute end-to-end user simulation and QA verification via the `e2e-qa-tester` skill. Carry the local scope into that skill; do not default to staging. If implementation adds test requirements, update the report and resolve them before QA. Pass this cleanup constraint explicitly: preserve required reports, logs, and screenshots for review and handoff before cleanup, even if the QA skill requests immediate deletion. Delete only expendable task-owned resources; never delete the only evidence copy.
 3. **UI changes only**: Capture process screenshots during the changed user workflow, following **UI Screenshot Evidence** below. Link them and the UI audit result screenshots in `.tmp/UI_EVIDENCE.md`. For tasks with no UI changes, mark screenshot evidence not applicable; do not require browser capture solely for this evidence package.
 4. Write results to `.tmp/QA_REPORT.md`. Return `STATUS: PASSED` only when the required checks pass and, for UI changes, the required screenshots are captured. Otherwise return `STATUS: FAILED` or `STATUS: BLOCKED` with the report path; resolve failures or missing requirements before Phase 5. If fixes change code, repeat code review and the affected QA checks; repeat the UI audit and refresh affected screenshots when the fixes affect UI.
 
@@ -156,7 +153,7 @@ Run immediately after implementation whenever the change affects rendered UI, co
 
 ### Phase 5: Finalizing (Documentation & Project Git Release)
 
-1. Orchestrator selects model tier and launches **Finalizing Agent** via `invoke_subagent`.
+1. Orchestrator selects model tier and launches **Finalizing Agent** with the active host's delegation tool.
 2. Finalizing Agent updates/writes codebase documentation.
 3. **UI evidence handoff, only for UI changes**: Preserve the final screenshot package as specified below, verify that its images and report open, and return their durable paths to the Orchestrator. If evidence cannot be preserved or delivered, report `STATUS: BLOCKED` and the exact missing requirement; do not claim the handoff is complete.
 4. **Project Git Release**: Read and execute the project-local `.agents/skills/git-release-flow/SKILL.md` prepared during setup. If it is missing or incomplete, resolve it through the Setup Phase before release. Skill setup does not grant permission to publish, merge, or deploy beyond the user's request.
