@@ -7,6 +7,7 @@ data class Book(
     val units: List<Concept>,
     val sourceText: String,
     val pdfPath: String? = null,
+    val sourceUrl: String? = null,
     val isSample: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
 ) {

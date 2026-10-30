@@ -404,6 +404,36 @@ class ReaderViewModel internal constructor(application: Application, private val
 
     fun saveText(title: String, author: String, text: String) = saveBook { repository.saveText(title, author, text) }
     fun importPdf(uri: Uri, title: String, author: String, questions: Boolean = false) = saveBook(questions) { repository.importPdf(uri, title, author) }
+    fun importUrl(url: String, autoPlay: Boolean = false) {
+        if (state.value.loading) return
+        update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                val extracted = withContext(Dispatchers.IO) {
+                    com.anchorreader.data.web.WebContentExtractor.extract(url)
+                }
+                val book = writeLock.withLock {
+                    withContext(Dispatchers.IO) {
+                        repository.saveWebArticle(extracted)
+                    }
+                }
+                val bytes = withContext(Dispatchers.IO) { totalStoredBytes() }
+                update {
+                    it.copy(
+                        books = listOf(book) + it.books.filter { saved -> saved.id != book.id },
+                        progress = it.progress + (book.id to Progress()),
+                        activeId = book.id,
+                        screen = if (autoPlay) Screen.PLAYER else Screen.OVERVIEW,
+                        loading = false,
+                        storedBytes = bytes
+                    )
+                }
+                if (autoPlay) {
+                    start(book, 0)
+                }
+            } catch (error: Exception) { fail(error) }
+        }
+    }
 
     private fun saveBook(questions: Boolean = false, action: () -> Book) {
         if (state.value.loading) return

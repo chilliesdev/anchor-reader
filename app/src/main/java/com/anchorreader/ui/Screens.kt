@@ -139,6 +139,19 @@ private fun BookCard(book: Book, progress: Progress?, onStart: () -> Unit, onDet
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(book.title, style = MaterialTheme.typography.titleLarge)
                     if (book.author.isNotBlank()) Text(book.author, color = Palette.Muted, style = MaterialTheme.typography.bodyLarge)
+                    if (book.sourceUrl != null) {
+                        val domain = remember(book.sourceUrl) {
+                            runCatching { java.net.URI(book.sourceUrl).host?.removePrefix("www.") }.getOrNull() ?: "Web"
+                        }
+                        Row(
+                            Modifier.background(Palette.TealSoft, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Outlined.Language, null, tint = Palette.Deep, modifier = Modifier.size(14.dp))
+                            Text(domain, color = Palette.Deep, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                     BookFacts(book, questionCount, compact = true)
                 }
             }
@@ -212,10 +225,11 @@ private fun Fact(icon: ImageVector, value: String, description: String) {
 
 @Composable
 fun NewBookScreen(onSaveText: (String, String, String) -> Unit, onImportPdf: (Uri, String, String, Boolean) -> Unit,
-    busy: Boolean, error: String?, onBack: () -> Unit) {
+    onImportUrl: (String) -> Unit = {}, busy: Boolean, error: String?, onBack: () -> Unit) {
     var flow by rememberSaveable { mutableStateOf("") }
     var title by rememberSaveable(flow) { mutableStateOf("") }
     var author by rememberSaveable(flow) { mutableStateOf("") }
+    var webUrl by rememberSaveable(flow) { mutableStateOf("") }
     var questions by rememberSaveable(flow) { mutableStateOf(false) }
     val draft: BookDraftViewModel = viewModel(key = "new-book-draft", factory = remember {
         viewModelFactory { initializer { BookDraftViewModel() } }
@@ -242,6 +256,7 @@ fun NewBookScreen(onSaveText: (String, String, String) -> Unit, onImportPdf: (Ur
         if (flow.isEmpty()) {
             NewChoice("Import PDF", Icons.Outlined.FileUpload) { flow = "pdf"; localError = null }
             NewChoice("Create book", Icons.Outlined.Edit) { draft.body = ""; flow = "text"; localError = null }
+            NewChoice("Import web link", Icons.Outlined.Link) { webUrl = ""; flow = "web"; localError = null }
         } else {
             Surface(shape = RoundedCornerShape(20.dp), color = Palette.Surface, border = BorderStroke(1.dp, Palette.Line)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -250,9 +265,20 @@ fun NewBookScreen(onSaveText: (String, String, String) -> Unit, onImportPdf: (Ur
                         Spacer(Modifier.width(6.dp)); Text("Back")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (flow == "pdf") IconBadge(Icons.Outlined.PictureAsPdf)
-                        Text(if (flow == "pdf") "Import PDF" else "Create book", style = MaterialTheme.typography.headlineSmall,
-                            modifier = Modifier.semantics { heading() })
+                        when (flow) {
+                            "pdf" -> IconBadge(Icons.Outlined.PictureAsPdf)
+                            "web" -> IconBadge(Icons.Outlined.Link)
+                            else -> IconBadge(Icons.Outlined.Edit)
+                        }
+                        Text(when (flow) {
+                            "pdf" -> "Import PDF"
+                            "web" -> "Import web link"
+                            else -> "Create book"
+                        }, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+                    }
+                    if (flow == "web") {
+                        BookField("Web or social link", webUrl, { webUrl = it; localError = null }, enabled = !busy, tag = "web_url")
+                        Text("Paste a link from Twitter/X, Reddit, Substack, Medium, or any web article.", fontSize = 12.sp, color = Palette.Muted)
                     }
                     if (flow == "pdf") {
                         Text("PDF file", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -264,8 +290,10 @@ fun NewBookScreen(onSaveText: (String, String, String) -> Unit, onImportPdf: (Ur
                         }
                         Text("Text PDFs only. Scanned files need OCR.", fontSize = 12.sp, color = Palette.Muted)
                     }
-                    BookField("Title", title, { title = it.take(120); localError = null }, enabled = !busy, tag = if (flow == "pdf") "pdf_title" else "create_title")
-                    BookField("Author (optional)", author, { author = it.take(120) }, enabled = !busy, tag = if (flow == "pdf") "pdf_author" else "create_author")
+                    if (flow != "web") {
+                        BookField("Title", title, { title = it.take(120); localError = null }, enabled = !busy, tag = if (flow == "pdf") "pdf_title" else "create_title")
+                        BookField("Author (optional)", author, { author = it.take(120) }, enabled = !busy, tag = if (flow == "pdf") "pdf_author" else "create_author")
+                    }
                     if (flow == "pdf") {
                         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
                             .toggleable(value = questions, enabled = !busy, role = Role.Switch, onValueChange = { questions = it })
@@ -282,18 +310,27 @@ fun NewBookScreen(onSaveText: (String, String, String) -> Unit, onImportPdf: (Ur
                     (localError ?: error)?.let { ErrorMessage(it) }
                     if (busy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Saving book…", fontSize = 14.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                        Text(if (flow == "web") "Fetching content…" else "Saving book…", fontSize = 14.sp, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
-                    PrimaryButton(if (flow == "pdf" && questions) "Save and add questions" else "Save book", {
+                    PrimaryButton(when {
+                        flow == "web" -> "Fetch and read"
+                        flow == "pdf" && questions -> "Save and add questions"
+                        else -> "Save book"
+                    }, {
                         localError = when {
-                            title.isBlank() -> "Enter a title."
+                            flow == "web" && webUrl.isBlank() -> "Enter a web link."
+                            flow == "web" && com.anchorreader.data.web.WebContentExtractor.findUrl(webUrl) == null -> "Enter a valid http or https link."
+                            flow != "web" && title.isBlank() -> "Enter a title."
                             flow == "pdf" && uriText == null -> "Choose a PDF file."
                             flow == "text" && draft.body.isBlank() -> "Enter book text."
                             else -> null
                         }
                         if (localError == null) {
-                            if (flow == "pdf") onImportPdf(Uri.parse(uriText!!), title.trim(), author.trim(), questions)
-                            else onSaveText(title.trim(), author.trim(), draft.body.trim())
+                            when (flow) {
+                                "web" -> onImportUrl(webUrl.trim())
+                                "pdf" -> onImportPdf(Uri.parse(uriText!!), title.trim(), author.trim(), questions)
+                                else -> onSaveText(title.trim(), author.trim(), draft.body.trim())
+                            }
                         }
                     }, Modifier.fillMaxWidth(), enabled = !busy)
                 }
@@ -348,7 +385,7 @@ fun OverviewScreen(book: Book, progress: Progress?, onStart: (Int?) -> Unit,
                 BookFacts(book, if (book.isSample) null else practice.questions.size)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     PrimaryButton(if (!book.isSample && progress?.visited.isNullOrEmpty()) "Read now" else startLabel(progress), { onStart(null) }, Modifier.fillMaxWidth())
-                    OverviewActions(onTranscript, onSource)
+                    OverviewActions(onTranscript, onSource, book.sourceUrl)
                 }
                 if (book.isSample || book.pdfPath != null) PracticeCard(book, practice, { confirmTransfer = true }, onCancelQuestions, { onPractice(null) }, onManageUsage, progress ?: Progress())
             }
@@ -445,26 +482,60 @@ private fun Modifier.conceptCardEdge(first: Boolean, last: Boolean): Modifier = 
 }
 
 @Composable
-private fun OverviewActions(onTranscript: () -> Unit, onSource: () -> Unit) {
+private fun OverviewActions(onTranscript: () -> Unit, onSource: () -> Unit, sourceUrl: String? = null) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
+    val context = LocalContext.current
     val labelStyle = MaterialTheme.typography.labelLarge
-    val labelWidth = with(density) {
-        maxOf(measurer.measure("Full text", labelStyle).size.width,
-            measurer.measure("Source", labelStyle).size.width).toDp()
+    val twoLabelWidth = with(density) {
+        maxOf(
+            measurer.measure("Full text", labelStyle).size.width,
+            measurer.measure("Source", labelStyle).size.width
+        ).toDp()
     }
-    // Native button padding, plus its icon and gap, must fit beside the full label.
-    val actionWidth = labelWidth + 48.dp + 18.dp + 6.dp
+    val threeLabelWidth = with(density) {
+        maxOf(
+            twoLabelWidth,
+            if (sourceUrl != null) measurer.measure("Open web page", labelStyle).size.width.toDp() else 0.dp
+        )
+    }
+    val twoActionWidth = twoLabelWidth + 48.dp + 18.dp + 6.dp
+    val threeActionWidth = threeLabelWidth + 48.dp + 18.dp + 6.dp
+    fun openWeb() {
+        if (sourceUrl != null) {
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl))) }
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        if ((maxWidth - 8.dp) / 2 >= actionWidth) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.weight(1f))
-                OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.weight(1f))
+        val threeFit = sourceUrl != null && (maxWidth - 16.dp) / 3 >= threeActionWidth
+        val twoFit = (maxWidth - 8.dp) / 2 >= twoActionWidth
+        when {
+            threeFit -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.weight(1f))
+                    OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.weight(1f))
+                    OverviewAction("Open web page", Icons.Outlined.OpenInBrowser, ::openWeb, Modifier.weight(1f))
+                }
             }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.fillMaxWidth())
-                OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.fillMaxWidth())
+            twoFit -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.weight(1f))
+                        OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.weight(1f))
+                    }
+                    if (sourceUrl != null) {
+                        OverviewAction("Open web page", Icons.Outlined.OpenInBrowser, ::openWeb, Modifier.fillMaxWidth())
+                    }
+                }
+            }
+            else -> {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OverviewAction("Full text", Icons.AutoMirrored.Outlined.Notes, onTranscript, Modifier.fillMaxWidth())
+                    OverviewAction("Source", Icons.AutoMirrored.Outlined.Article, onSource, Modifier.fillMaxWidth())
+                    if (sourceUrl != null) {
+                        OverviewAction("Open web page", Icons.Outlined.OpenInBrowser, ::openWeb, Modifier.fillMaxWidth())
+                    }
+                }
             }
         }
     }

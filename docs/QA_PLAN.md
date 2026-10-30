@@ -32,6 +32,9 @@ Results: `app/build/reports/tests/testDebugUnitTest/`, `app/build/reports/lint-r
 - Shared cards: sample/text/PDF use common title/body fonts and layout; author stays visible; Start/Continue has Play icon; Details is a named 48 dp icon control.
 - Cover: pixel/aspect/white-background checks prove actual PDF page one; image-only cover with digital body is accepted. Missing/corrupt cover has a safe fallback.
 - Migration: old section metadata and progress map to source sentence offsets. Partial retry and corrupt record identity cannot alter a different saved book.
+- Web articles and social links: URL validation for HTTP/HTTPS; 5 MiB payload ceiling; extraction of Twitter threads, Reddit posts/comments, Substack newsletters, Medium articles, and generic blogs. Heading chunking and 2–4 sentence fallback chunking.
+- Android system share: `ACTION_SEND` intent with `text/plain` extracts URL, imports article, and starts immediate Player playback.
+- Responsive overview actions: "Full text", "Source", and "Open web page" buttons adapt to 3-button row, 2-button row, or vertical stack under 320dp / 200% text scale.
 - Sample library → player → transcript and source → still mode → concept controls.
 - Correct, wrong, and skipped recall answers → lesson end → saved record after activity restart.
 - Text book: required fields → save → open player → local persistence → delete.

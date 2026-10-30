@@ -1,5 +1,20 @@
 # Android QA results
 
+## Web and social reading platforms update
+
+30 October 2026. **PASSED for Web & Social Reading Platforms.** Reviewed base `722ab2f` plus web extraction and UI changes. Native debug build and Android lint passed with zero errors and zero warnings. 219 JVM unit tests passed with zero failures, zero errors, and zero skips.
+
+Key verified scopes:
+- Twitter/X thread extraction (FXTwitter API, thread chunking `Tweet N/M · @author`, oEmbed fallback).
+- Reddit post extraction (public `.json` parser, post body, top discussion comments filtered for AutoMod/deleted).
+- Substack, Medium and generic web articles (Jsoup DOM cleaning, heading chunking, 2–4 sentence fallback chunking).
+- WebHttp network guard (15s connect / 30s read timeouts, 5 MiB payload ceiling, safe redirect limit).
+- Android system share integration (`android.intent.action.SEND` for `text/plain` triggers direct extraction and playback).
+- Persistence & compatibility (`sourceUrl` serialization, legacy record loading with default `null`).
+- Device UI tests on `Pixel_8` AVD: `OverviewActionsDeviceTest` (2/2 pass) and `LibraryCardsDeviceTest` (3/3 pass). Responsive action stack verified at 320dp and 200% font scale.
+
+Durable test evidence and UI screenshots are preserved in `docs/evidence/web-reader/`.
+
 ## Open Design update
 
 12 October 2026. **PASSED for issue #8 and all 17 children #9–#25.** Reviewed base `538ef6783b701752d5389f0c1feae5c8890e36ec` plus final design changes. Debug APK SHA-256 `09392c3d0a47f1d51e079f867f8741d57c53a0aed66c63c49e517c9f728d2ada`. Native build/lint passed; 194 JVM tests passed with zero failures/errors/skips. Lint has zero errors and 15 existing warnings.

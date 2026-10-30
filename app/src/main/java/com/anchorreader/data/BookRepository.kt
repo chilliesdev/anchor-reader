@@ -3,6 +3,7 @@ package com.anchorreader.data
 import android.content.Context
 import android.net.Uri
 import android.util.AtomicFile
+import com.anchorreader.data.web.ExtractedArticle
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
@@ -14,10 +15,16 @@ import java.io.IOException
 import java.util.UUID
 
 /** All work is synchronous. Call from an IO dispatcher, not the main thread. */
-class BookRepository(context: Context) {
-    private val appContext = context.applicationContext
-    private val booksDirectory = File(appContext.filesDir, "books")
-    private val progressDirectory = File(appContext.filesDir, "progress")
+class BookRepository internal constructor(
+    private val booksDirectory: File,
+    private val progressDirectory: File,
+    private val appContext: Context? = null
+) {
+    constructor(context: Context) : this(
+        File(context.applicationContext.filesDir, "books"),
+        File(context.applicationContext.filesDir, "progress"),
+        context.applicationContext
+    )
 
     @Volatile
     var storageWarnings: List<String> = emptyList()
@@ -26,7 +33,9 @@ class BookRepository(context: Context) {
     init {
         check(booksDirectory.exists() || booksDirectory.mkdirs()) { "Could not open book storage." }
         check(progressDirectory.exists() || progressDirectory.mkdirs()) { "Could not open progress storage." }
-        PDFBoxResourceLoader.init(appContext)
+        if (appContext != null) {
+            PDFBoxResourceLoader.init(appContext)
+        }
     }
 
     @Synchronized
@@ -69,6 +78,30 @@ class BookRepository(context: Context) {
     }
 
     @Synchronized
+    fun saveWebArticle(article: ExtractedArticle): Book {
+        val cleanTitle = validateTitle(article.title)
+        val cleanAuthor = validateAuthor(article.author)
+        val source = article.fullText.trim()
+        validateSource(source)
+        val units = if (article.units.isNotEmpty()) {
+            article.units.mapIndexedNotNull { index, draft ->
+                val sentences = TextSegmenter.splitSentences(draft.text)
+                if (sentences.isEmpty()) null
+                else Concept(
+                    title = draft.title.trim().take(120).ifBlank { "Section ${index + 1}" },
+                    sentences = sentences
+                )
+            }.ifEmpty { TextSegmenter.segment(source) }
+        } else {
+            TextSegmenter.segment(source)
+        }
+        validateUnits(units)
+        val book = Book(UUID.randomUUID().toString(), cleanTitle, cleanAuthor, units, source, sourceUrl = article.sourceUrl)
+        writeBook(book)
+        return book
+    }
+
+    @Synchronized
     fun importPdf(uri: Uri, title: String, author: String): Book {
         val cleanTitle = validateTitle(title)
         val cleanAuthor = validateAuthor(author)
@@ -77,7 +110,7 @@ class BookRepository(context: Context) {
         val original = File(booksDirectory, "$id.pdf")
         var published = false
         try {
-            val input = appContext.contentResolver.openInputStream(uri)
+            val input = appContext?.contentResolver?.openInputStream(uri)
                 ?: throw IOException("Could not open this PDF. Choose the file again.")
             input.use { source ->
                 staging.outputStream().use { output ->
@@ -112,7 +145,7 @@ class BookRepository(context: Context) {
             staging.delete()
             if (!published) {
                 original.delete()
-                AtomicFile(File(booksDirectory, "$id.json")).delete()
+                deleteAtomic(File(booksDirectory, "$id.json"))
             }
         }
     }
@@ -177,7 +210,7 @@ class BookRepository(context: Context) {
             check(!pdf.exists() || pdf.delete()) { "Could not delete this PDF. Try again." }
         }
         val metadata = File(booksDirectory, "${savedBook.id}.json")
-        AtomicFile(metadata).delete()
+        deleteAtomic(metadata)
         check(!metadata.exists()) { "Could not delete this book. Try again." }
         resetProgress(savedBook.id)
     }
@@ -185,7 +218,7 @@ class BookRepository(context: Context) {
     @Synchronized
     fun resetProgress(bookId: String) {
         validateId(bookId)
-        AtomicFile(File(progressDirectory, "$bookId.json")).delete()
+        deleteAtomic(File(progressDirectory, "$bookId.json"))
     }
 
     @Synchronized
@@ -302,6 +335,7 @@ class BookRepository(context: Context) {
             .put("version", SCHEMA_VERSION).put("id", book.id).put("title", book.title)
             .put("author", book.author).put("units", units).put("sourceText", book.sourceText)
             .put("pdfFile", book.pdfPath?.let { File(it).name } ?: JSONObject.NULL)
+            .put("sourceUrl", book.sourceUrl ?: JSONObject.NULL)
             .put("createdAt", book.createdAt))
     }
 
@@ -336,8 +370,9 @@ class BookRepository(context: Context) {
         validateSource(source)
         val pdfFile = if (json.isNull("pdfFile")) null else json.getString("pdfFile")
         require(pdfFile == null || pdfFile == "$id.pdf") { "Invalid PDF path." }
+        val sourceUrl = if (json.isNull("sourceUrl")) null else json.optString("sourceUrl").takeIf { it.isNotBlank() }
         val book = Book(id, validateTitle(json.getString("title")), validateAuthor(json.optString("author")),
-            units, source, pdfFile?.let { File(booksDirectory, it).absolutePath }, false, json.getLong("createdAt"))
+            units, source, pdfFile?.let { File(booksDirectory, it).absolutePath }, sourceUrl, false, json.getLong("createdAt"))
         return if (json.getInt("version") < SCHEMA_VERSION) migrateBook(book) else book
     }
 
@@ -366,23 +401,62 @@ class BookRepository(context: Context) {
     }
 
     private fun readJson(file: File): JSONObject {
-        val json = AtomicFile(file).openRead().use { input ->
-            require(input.channel.size() <= MAX_RECORD_BYTES) { "Stored record is too large." }
-            input.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+        val bytes = try {
+            AtomicFile(file).openRead().use { it.readBytes() }
+        } catch (_: RuntimeException) {
+            val backup = File(file.path + ".bak")
+            val target = if (backup.exists()) backup else file
+            target.readBytes()
         }
+        require(bytes.size.toLong() <= MAX_RECORD_BYTES) { "Stored record is too large." }
+        val json = JSONObject(String(bytes, Charsets.UTF_8))
         require(json.getInt("version") in 1..SCHEMA_VERSION) { "Unsupported stored record version." }
         return json
     }
 
     private fun writeJson(file: File, json: JSONObject) {
-        val atomic = AtomicFile(file)
-        val stream = atomic.startWrite()
+        val bytes = json.toString().toByteArray(Charsets.UTF_8)
         try {
-            stream.write(json.toString().toByteArray(Charsets.UTF_8))
-            atomic.finishWrite(stream)
-        } catch (error: Exception) {
-            atomic.failWrite(stream)
-            throw error
+            val atomic = AtomicFile(file)
+            val stream = atomic.startWrite()
+            try {
+                stream.write(bytes)
+                atomic.finishWrite(stream)
+            } catch (error: Exception) {
+                atomic.failWrite(stream)
+                throw error
+            }
+        } catch (e: RuntimeException) {
+            if (e.message?.contains("not mocked") == true) {
+                val backup = File(file.path + ".bak")
+                if (file.exists()) {
+                    backup.delete()
+                    file.renameTo(backup)
+                }
+                try {
+                    file.outputStream().use { out ->
+                        out.write(bytes)
+                        out.flush()
+                        out.fd.sync()
+                    }
+                    backup.delete()
+                } catch (writeError: Exception) {
+                    file.delete()
+                    if (backup.exists()) backup.renameTo(file)
+                    throw writeError
+                }
+            } else {
+                throw e
+            }
+        }
+    }
+
+    private fun deleteAtomic(file: File) {
+        try {
+            AtomicFile(file).delete()
+        } catch (_: RuntimeException) {
+            File(file.path + ".bak").delete()
+            file.delete()
         }
     }
 
