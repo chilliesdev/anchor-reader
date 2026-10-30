@@ -1,5 +1,14 @@
 # Android UI audit
 
+## Supertonic 3 HD neural text-to-speech UI audit
+
+30 October 2026. Independent rendered UI audit **PASSED** for issue #39 on `emulator-5554` (API 35, 16 KB page-size kernel).
+- Audited states: Not installed (~129 MB size indication), Downloading (determinate progress bar with downloaded/total MB), Failed (error alert in `Palette.ErrorInk` with Retry), Installed HD voice (HD toggle, 10-voice chips `F1`–`F5` and `M1`–`M5`, Preview voice, Delete HD voices dialog), and System voice fallback.
+- Viewports tested: 411dp standard portrait, 840x411dp landscape, 320dp narrow portrait, and 200% font scale accessibility.
+- All touch targets satisfy >= 48dp x 48dp minimum requirements. Filter chip minimum bounds enforced via `.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)`.
+- Responsive chip layout uses `FlowRow` to wrap without clipping or horizontal overflow on 320dp and 200% font scale.
+- 9/9 UI device tests passed in `SettingsUiDeviceTest`.
+
 ## Web and social reading platforms update
 
 30 October 2026. Independent rendered audit **PASSED**. Reviewed base `722ab2f` plus web extraction and UI changes. Tested configurations: phone 411dp (`Pixel_8`), narrow 320dp, font scale 1.0 and 2.0 (200% text scaling).

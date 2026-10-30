@@ -34,6 +34,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import com.anchorreader.VoiceState
+import com.anchorreader.supertonic.VoicePackState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -695,9 +698,17 @@ private fun FinishStat(value: String, caption: String, modifier: Modifier) {
 fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: Long, voiceStatus: String,
     onVoiceSettings: () -> Unit, onReset: () -> Unit, onClose: () -> Unit, onLicenses: () -> Unit = {},
     account: ChatGptAccountState = ChatGptAccountState(), onConnect: () -> Unit = {}, onSignOut: () -> Unit = {}, onCancelSignIn: () -> Unit = {}, onManageUsage: () -> Unit = {},
-    onResetConnection: () -> Unit = {}) {
+    onResetConnection: () -> Unit = {},
+    voiceState: VoiceState? = null,
+    onDownloadVoicePack: () -> Unit = {},
+    onCancelVoicePack: () -> Unit = {},
+    onDeleteVoicePack: () -> Unit = {},
+    onSetEnginePreference: (Boolean) -> Unit = {},
+    onSetVoicePreference: (String) -> Unit = {},
+    onPreviewVoice: () -> Unit = {}) {
     var confirmReset by remember { mutableStateOf(false) }
     var confirmConnectionReset by remember { mutableStateOf(false) }
+    var confirmDeleteVoice by remember { mutableStateOf(false) }
     val context = LocalContext.current
     PageColumn {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -722,8 +733,49 @@ fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: 
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Device narration", fontWeight = FontWeight.SemiBold)
-            Text(voiceStatus, color = Palette.Muted, fontSize = 13.sp)
-            SecondaryButton("Voice settings", onVoiceSettings)
+            val pack = voiceState?.packState ?: VoicePackState.NotInstalled
+            val currentStatus = voiceState?.status ?: voiceStatus
+            Text(currentStatus, color = Palette.Muted, fontSize = 13.sp)
+
+            when (pack) {
+                is VoicePackState.NotInstalled -> {
+                    Text("Supertonic 3 HD offline voice (~129 MB)", color = Palette.Muted, fontSize = 13.sp)
+                    SecondaryButton("Download HD voice pack", onDownloadVoicePack)
+                }
+                is VoicePackState.Downloading -> {
+                    val progress = if (pack.totalBytes > 0) pack.bytesRead.toFloat() / pack.totalBytes else 0f
+                    val percent = (progress * 100).toInt()
+                    val mbRead = pack.bytesRead / (1024 * 1024)
+                    val mbTotal = pack.totalBytes / (1024 * 1024)
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                        color = Palette.Teal,
+                    )
+                    Text("$mbRead MB of $mbTotal MB ($percent%)", color = Palette.Muted, fontSize = 12.sp)
+                    SecondaryButton("Cancel download", onCancelVoicePack)
+                }
+                is VoicePackState.Failed -> {
+                    Text(pack.message, color = Palette.ErrorInk, fontSize = 13.sp)
+                    SecondaryButton("Retry download", onDownloadVoicePack)
+                }
+                is VoicePackState.Installed -> {
+                    val useHd = voiceState?.useHd ?: true
+                    SettingRow("HD offline voice", if (useHd) "Using Supertonic 3 HD neural speech." else "Using system device voice.") {
+                        Switch(useHd, onSetEnginePreference, Modifier.semantics { contentDescription = "HD offline voice" })
+                    }
+                    if (useHd) {
+                        Text("Voice selection", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        val selected = voiceState?.selectedVoice ?: "F1"
+                        VoiceSelectorRow("Female voices", listOf("F1", "F2", "F3", "F4", "F5"), selected, onSetVoicePreference)
+                        VoiceSelectorRow("Male voices", listOf("M1", "M2", "M3", "M4", "M5"), selected, onSetVoicePreference)
+                        SecondaryButton("Preview voice", onPreviewVoice)
+                    }
+                    SecondaryButton("Delete HD voices", { confirmDeleteVoice = true })
+                }
+            }
+
+            SecondaryButton("Device voice settings", onVoiceSettings)
         }
         HorizontalDivider(color = Palette.Line)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -741,6 +793,10 @@ fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: 
         }
         SecondaryButton("Open-source licenses", onLicenses)
     }
+    if (confirmDeleteVoice) AlertDialog(onDismissRequest = { confirmDeleteVoice = false }, title = { Text("Delete HD voices?") },
+        text = { Text("This frees ~129 MB of storage. Narration will switch to your device's built-in voice. Your books, reading positions, and saved questions stay.") },
+        confirmButton = { TextButton({ confirmDeleteVoice = false; onDeleteVoicePack() }) { Text("Delete HD voices", color = Palette.ErrorInk) } },
+        dismissButton = { TextButton({ confirmDeleteVoice = false }) { Text("Keep voices") } })
     if (confirmReset) AlertDialog(onDismissRequest = { confirmReset = false }, title = { Text("Clear all progress?") },
         text = { Text("This clears saved positions and answers. Books and source files stay.") },
         confirmButton = { TextButton({ confirmReset = false; onReset() }) { Text("Clear progress", color = Palette.ErrorInk) } },
@@ -800,6 +856,31 @@ fun Eyebrow(text: String) { Text(text, fontSize = 11.sp, letterSpacing = 1.sp, f
 private fun ErrorMessage(text: String) {
     Text(text, Modifier.fillMaxWidth().background(Palette.Error, RoundedCornerShape(8.dp)).padding(12.dp)
         .semantics { liveRegion = LiveRegionMode.Assertive }, color = Palette.ErrorInk, fontSize = 14.sp)
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun VoiceSelectorRow(label: String, voices: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = Palette.Muted, fontSize = 12.sp)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            voices.forEach { voice ->
+                val isSelected = voice == selected
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onSelect(voice) },
+                    label = { Text(voice, fontSize = 12.sp) },
+                    modifier = Modifier
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                        .semantics { contentDescription = "Voice $voice" }
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -2,15 +2,24 @@ package com.anchorreader
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.AudioTrack
+import android.media.PlaybackParams
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import kotlinx.coroutines.flow.StateFlow
+import com.anchorreader.supertonic.SupertonicEngine
+import com.anchorreader.supertonic.SupertonicManifest
+import com.anchorreader.supertonic.VoicePackService
+import com.anchorreader.supertonic.VoicePackState
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
@@ -20,6 +29,9 @@ data class VoiceState(
     val playing: Boolean = false,
     val status: String = "Starting device voice…",
     val speed: Float = 1f,
+    val packState: VoicePackState = VoicePackState.NotInstalled,
+    val useHd: Boolean = true,
+    val selectedVoice: String = "F1",
 )
 
 interface Narration {
@@ -27,14 +39,37 @@ interface Narration {
     fun speak(text: String, onDone: () -> Unit)
     fun pause()
     fun changeSpeed(): Float
+    fun prepareNext(text: String) {}
+    fun setEnginePreference(useHd: Boolean) {}
+    fun setVoicePreference(voice: String) {}
+    fun downloadVoicePack() {}
+    fun cancelVoicePackDownload() {}
+    fun deleteVoicePack() {}
+    fun previewVoice(onDone: () -> Unit = {}) {}
 }
 
-/** Device speech only. Never sends book text to a network voice. */
-class Narrator(context: Context) : Narration, AutoCloseable {
+/** Dual-engine speech: Supertonic 3 HD neural TTS when installed and enabled, with system TextToSpeech baseline & fallback. */
+class Narrator(private val context: Context) : Narration, AutoCloseable {
     private val handler = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    private val mutableState = MutableStateFlow(VoiceState())
+    private val preferences = context.getSharedPreferences("supertonic_prefs", Context.MODE_PRIVATE)
+
+    val voicePackService = VoicePackService(context)
+
+    private val initialSpeed = preferences.getFloat("speed", 1f)
+    private val initialUseHd = preferences.getBoolean("use_hd", true)
+    private val initialVoice = preferences.getString("voice", SupertonicManifest.DEFAULT_VOICE) ?: SupertonicManifest.DEFAULT_VOICE
+
+    private val mutableState = MutableStateFlow(
+        VoiceState(
+            speed = initialSpeed,
+            useHd = initialUseHd,
+            selectedVoice = initialVoice,
+            packState = voicePackService.checkInitialState(),
+        )
+    )
     override val state = mutableState.asStateFlow()
+
     private var engine: TextToSpeech? = null
     private var initializing = true
     private var initializationGeneration = 0L
@@ -43,7 +78,24 @@ class Narrator(context: Context) : Narration, AutoCloseable {
     private var buffers: List<String> = emptyList()
     private var bufferIndex = 0
     private val utteranceId: String get() = "$generation:$bufferIndex"
-    private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+
+    private var systemReady = false
+    private var systemStatus = "Starting device voice…"
+
+    private var supertonicEngine: SupertonicEngine? = null
+    private var audioTrack: AudioTrack? = null
+    private var playbackJob: Job? = null
+    private var lookaheadJob: Job? = null
+    private var lookaheadCache: Pair<String, ShortArray>? = null
+    private var idleTimeoutJob: Job? = null
+
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
     private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(attributes)
         .setOnAudioFocusChangeListener({ change -> if (change != AudioManager.AUDIOFOCUS_GAIN) pause() }, handler)
@@ -51,6 +103,36 @@ class Narrator(context: Context) : Narration, AutoCloseable {
 
     init {
         createEngine(context)
+        observeVoicePackState()
+    }
+
+    private fun observeVoicePackState() {
+        scope.launch {
+            voicePackService.state.collect { packState ->
+                handler.post {
+                    mutableState.value = state.value.copy(packState = packState)
+                    updateReadinessAndStatus()
+                }
+            }
+        }
+    }
+
+    private fun updateReadinessAndStatus() {
+        val current = state.value
+        val isHdActive = current.useHd && current.packState is VoicePackState.Installed
+        if (isHdActive) {
+            mutableState.value = current.copy(
+                ready = true,
+                initializing = false,
+                status = "Offline HD voice ready · ${current.selectedVoice}"
+            )
+        } else {
+            mutableState.value = current.copy(
+                ready = systemReady,
+                initializing = initializing,
+                status = systemStatus
+            )
+        }
     }
 
     private fun createEngine(context: Context) {
@@ -66,7 +148,9 @@ class Narrator(context: Context) : Narration, AutoCloseable {
         initializing = false
         val speech = engine ?: return
         if (result != TextToSpeech.SUCCESS) {
-            mutableState.value = state.value.copy(initializing = false, status = "No device voice. Open voice settings to install one.")
+            systemReady = false
+            systemStatus = "No device voice. Open voice settings to install one."
+            updateReadinessAndStatus()
             return
         }
         val voice = speech.voices?.filter {
@@ -74,7 +158,9 @@ class Narrator(context: Context) : Narration, AutoCloseable {
                 !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
         }?.sortedWith(compareBy({ if (it.locale.country == "GB") 0 else if (it.locale.country == "US") 1 else 2 }, { -it.quality }))?.firstOrNull()
         if (voice == null || speech.setVoice(voice) != TextToSpeech.SUCCESS) {
-            mutableState.value = state.value.copy(initializing = false, status = "Install an offline English voice in device voice settings. You can still read all text.")
+            systemReady = false
+            systemStatus = "Install an offline English voice in device voice settings. You can still read all text."
+            updateReadinessAndStatus()
             return
         }
         speech.setAudioAttributes(attributes)
@@ -101,16 +187,45 @@ class Narrator(context: Context) : Narration, AutoCloseable {
             override fun onError(utteranceId: String?) { speechError(utteranceId) }
             override fun onError(utteranceId: String?, errorCode: Int) { speechError(utteranceId) }
         })
-        mutableState.value = state.value.copy(ready = true, initializing = false, status = "Offline device voice ready")
+        systemReady = true
+        systemStatus = "Offline device voice ready"
+        updateReadinessAndStatus()
     }
 
     private fun speechError(id: String?) {
         handler.post {
             if (id == utteranceId) {
                 pause()
-                mutableState.value = state.value.copy(ready = false, status = "Voice data is unavailable. Install an offline English voice in voice settings.")
+                systemReady = false
+                systemStatus = "Voice data is unavailable. Install an offline English voice in voice settings."
+                updateReadinessAndStatus()
             }
         }
+    }
+
+    private fun getOrCreateSupertonicEngine(): SupertonicEngine {
+        var eng = supertonicEngine
+        if (eng == null) {
+            eng = SupertonicEngine(voicePackService.getVoiceDir())
+            supertonicEngine = eng
+        }
+        return eng
+    }
+
+    private fun scheduleIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = scope.launch {
+            delay(180_000L) // 3 minutes
+            if (!state.value.playing) {
+                supertonicEngine?.close()
+                supertonicEngine = null
+            }
+        }
+    }
+
+    private fun cancelIdleTimeout() {
+        idleTimeoutJob?.cancel()
+        idleTimeoutJob = null
     }
 
     override fun speak(text: String, onDone: () -> Unit) {
@@ -120,11 +235,21 @@ class Narrator(context: Context) : Narration, AutoCloseable {
             mutableState.value = state.value.copy(status = "Audio is in use. Try play again.")
             return
         }
+
+        val useHd = state.value.useHd && state.value.packState is VoicePackState.Installed
+        if (useHd) {
+            speakHd(text, onDone)
+        } else {
+            speakSystem(text, onDone)
+        }
+    }
+
+    private fun speakSystem(text: String, onDone: () -> Unit) {
         buffers = SpeechBuffers.split(text, TextToSpeech.getMaxSpeechInputLength())
         if (buffers.isEmpty()) { audio.abandonAudioFocusRequest(focus); return }
         bufferIndex = 0
         completion = onDone
-        mutableState.value = state.value.copy(playing = true, status = "Offline device voice ready")
+        mutableState.value = state.value.copy(playing = true)
         speakBuffer()
     }
 
@@ -134,14 +259,141 @@ class Narrator(context: Context) : Narration, AutoCloseable {
         if (engine?.speak(buffers[bufferIndex], TextToSpeech.QUEUE_FLUSH, parameters, id) != TextToSpeech.SUCCESS) speechError(id)
     }
 
+    private fun speakHd(text: String, onDone: () -> Unit) {
+        completion = onDone
+        mutableState.value = state.value.copy(playing = true)
+        cancelIdleTimeout()
+
+        val voice = state.value.selectedVoice
+        val speed = state.value.speed
+        val cacheKey = "$voice:$speed:$text"
+
+        playbackJob = scope.launch(Dispatchers.Default) {
+            try {
+                val pcm: ShortArray
+                if (lookaheadCache?.first == cacheKey) {
+                    pcm = lookaheadCache!!.second
+                    lookaheadCache = null
+                } else {
+                    val eng = getOrCreateSupertonicEngine()
+                    pcm = eng.synthesize(text, voice, speed)
+                }
+
+                if (pcm.isEmpty() || !isActive) {
+                    withContext(Dispatchers.Main) {
+                        mutableState.value = state.value.copy(playing = false)
+                        audio.abandonAudioFocusRequest(focus)
+                        scheduleIdleTimeout()
+                    }
+                    return@launch
+                }
+
+                playPcm(pcm)
+
+                withContext(Dispatchers.Main) {
+                    mutableState.value = state.value.copy(playing = false)
+                    audio.abandonAudioFocusRequest(focus)
+                    scheduleIdleTimeout()
+                    val cb = completion
+                    completion = null
+                    cb?.invoke()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    mutableState.value = state.value.copy(playing = false)
+                    audio.abandonAudioFocusRequest(focus)
+                    scheduleIdleTimeout()
+                }
+            }
+        }
+    }
+
+    private suspend fun playPcm(pcm: ShortArray) = withContext(Dispatchers.IO) {
+        val minBufferSize = AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val bufferSize = maxOf(minBufferSize, pcm.size * 2, 44100 * 2)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(attributes)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(44100)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
+        audioTrack = track
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                track.playbackParams = PlaybackParams().apply {
+                    setSpeed(state.value.speed)
+                    setPitch(1.0f)
+                }
+            }
+            track.play()
+            track.write(pcm, 0, pcm.size)
+
+            while (track.playState == AudioTrack.PLAYSTATE_PLAYING && track.playbackHeadPosition < pcm.size) {
+                delay(20)
+            }
+        } finally {
+            runCatching {
+                track.stop()
+                track.release()
+            }
+            if (audioTrack === track) {
+                audioTrack = null
+            }
+        }
+    }
+
+    override fun prepareNext(text: String) {
+        if (!state.value.useHd || state.value.packState !is VoicePackState.Installed) return
+        val voice = state.value.selectedVoice
+        val speed = state.value.speed
+        val cacheKey = "$voice:$speed:$text"
+
+        lookaheadJob?.cancel()
+        lookaheadJob = scope.launch(Dispatchers.Default) {
+            try {
+                val eng = getOrCreateSupertonicEngine()
+                val pcm = eng.synthesize(text, voice, speed)
+                if (isActive && pcm.isNotEmpty()) {
+                    lookaheadCache = cacheKey to pcm
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
     override fun pause() {
         generation++
         completion = null
         buffers = emptyList()
         bufferIndex = 0
+
+        playbackJob?.cancel()
+        playbackJob = null
+
+        lookaheadJob?.cancel()
+        lookaheadJob = null
+        lookaheadCache = null
+
+        audioTrack?.let {
+            runCatching {
+                it.pause()
+                it.flush()
+                it.stop()
+                it.release()
+            }
+        }
+        audioTrack = null
+
         engine?.stop()
         audio.abandonAudioFocusRequest(focus)
         mutableState.value = state.value.copy(playing = false)
+        scheduleIdleTimeout()
     }
 
     override fun changeSpeed(): Float {
@@ -149,12 +401,46 @@ class Narrator(context: Context) : Narration, AutoCloseable {
         val next = choices[(choices.indexOf(state.value.speed) + 1) % choices.size]
         pause()
         engine?.setSpeechRate(next)
+        preferences.edit().putFloat("speed", next).apply()
         mutableState.value = state.value.copy(speed = next)
         return next
     }
 
+    override fun setEnginePreference(useHd: Boolean) {
+        preferences.edit().putBoolean("use_hd", useHd).apply()
+        mutableState.value = state.value.copy(useHd = useHd)
+        updateReadinessAndStatus()
+    }
+
+    override fun setVoicePreference(voice: String) {
+        preferences.edit().putString("voice", voice).apply()
+        mutableState.value = state.value.copy(selectedVoice = voice)
+        updateReadinessAndStatus()
+    }
+
+    override fun downloadVoicePack() {
+        voicePackService.download()
+    }
+
+    override fun cancelVoicePackDownload() {
+        voicePackService.cancel()
+    }
+
+    override fun deleteVoicePack() {
+        pause()
+        supertonicEngine?.close()
+        supertonicEngine = null
+        voicePackService.delete()
+        updateReadinessAndStatus()
+    }
+
+    override fun previewVoice(onDone: () -> Unit) {
+        val sample = "AnchorReader brings books and papers to life on your device."
+        speak(sample, onDone)
+    }
+
     fun refresh(context: Context) {
-        if (!state.value.ready && !initializing) {
+        if (!state.value.ready && !initializing && (!state.value.useHd || state.value.packState !is VoicePackState.Installed)) {
             pause()
             engine?.shutdown()
             createEngine(context)
@@ -163,6 +449,9 @@ class Narrator(context: Context) : Narration, AutoCloseable {
 
     override fun close() {
         pause()
+        scope.cancel()
+        supertonicEngine?.close()
+        supertonicEngine = null
         initializationGeneration++
         engine?.shutdown()
         engine = null
