@@ -12,6 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import com.anchorreader.data.web.WebContentExtractor
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +33,7 @@ import com.anchorreader.ui.*
 
 class MainActivity : ComponentActivity() {
     private lateinit var narrator: Narrator
+    private val model: ReaderViewModel by viewModels()
     private val noisy = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { narrator.pause() }
     }
@@ -40,7 +43,26 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         narrator = Narrator(this)
         ContextCompat.registerReceiver(this, noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
-        setContent { AnchorTheme { ReaderApp(narrator) } }
+        handleSendIntent(intent)
+        setContent { AnchorTheme { ReaderApp(narrator, model) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSendIntent(intent)
+    }
+
+    private fun handleSendIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.dataString
+            if (!text.isNullOrBlank()) {
+                val url = WebContentExtractor.findUrl(text)
+                if (url != null) {
+                    model.importUrl(url, autoPlay = true)
+                }
+            }
+        }
     }
 
     override fun onResume() { super.onResume(); if (::narrator.isInitialized) narrator.refresh(this) }
@@ -169,7 +191,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
                 if (state.loading && state.books.isEmpty()) CircularProgressIndicator(Modifier.align(Alignment.Center))
                 else when (state.screen) {
                     Screen.LIBRARY -> LibraryScreen(state.books, state.progress, { pauseAnd { model.start(it) } }, { pauseAnd { model.details(it) } }, state.practice)
-                    Screen.NEW -> NewBookScreen(model::saveText, model::importPdf, state.loading, state.error, { model.navigate(Screen.LIBRARY) })
+                    Screen.NEW -> NewBookScreen(model::saveText, model::importPdf, { url -> model.importUrl(url, autoPlay = true) }, state.loading, state.error, { model.navigate(Screen.LIBRARY) })
                     Screen.OVERVIEW -> OverviewScreen(state.book, state.currentProgress, { pauseAnd { model.start(state.book, it) } }, { dialog = "source" }, { dialog = "transcript" }, model::deleteBook,
                         state.currentPractice, model::addQuestions, model::cancelQuestions, { unit -> pauseAnd { model.openPractice(unit) } }, ::manageUsage)
                     Screen.CHECK -> CheckScreen(state.questions[state.questionIndex], state.questionIndex + 1, state.outcome, state.selectedAnswer, model::selectAnswer, { model.answer() }, { model.answer(true) }, model::continueAfterQuestion, model::reviewConcept, { dialog = "source" },

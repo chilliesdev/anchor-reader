@@ -25,11 +25,12 @@ These are real app screens captured on 14 October 2026. They use the bundled sam
 
 ## What you can do
 
-- Create a book from text or import a digital PDF with the Android file picker.
+- Create a book from text, import a digital PDF with the Android file picker, or import web articles and social platforms (Twitter/X threads, Reddit posts, Substack newsletters, Medium posts, and generic web pages).
+- Share web links directly from browsers or social apps to AnchorReader through the Android system share sheet (`ACTION_SEND`) to start reading immediately.
 - Use the Library and book overview to start, continue or review a book. Choose a concept from its outline.
 - Read complete sentences. Use sentence controls, or swipe up and down to change concepts. Long sentences use exact display parts when needed.
 - Listen with an installed offline English voice. Pause narration, change speed or use a still background. The Player also has a silent workshop video background.
-- Open the original PDF, full text or lesson outline. PDF cards use the original first page as their cover.
+- Open the original PDF, web source page, full text or lesson outline. PDF cards show the first page cover; web imports show the source domain badge.
 - Use the bundled lesson, diagram and authored recall checks without a connection.
 - Start, resume or repeat saved practice from the book overview. Open Quick check from the Player. Review feedback and grouped results.
 - Keep reading positions and answers across app restarts. Inspect storage, clear progress or delete imported books. Clearing progress removes answers but keeps books and saved questions.
@@ -46,6 +47,7 @@ The app saves up to three multiple-choice questions per section. Short sections 
 
 - Android 8.0/API 26 or later is required.
 - PDFs must be no more than 25 MiB, 200 pages and one million text characters. Scanned body pages, encrypted files and damaged files are not supported. An image-only cover can accompany digital body text. There is no OCR.
+- Web and social imports support HTTP and HTTPS URLs up to 5 MiB. Live web extraction needs an internet connection; extracted content, short-form concepts and reading positions are saved locally and read offline. Twitter/X threads use public APIs with oEmbed fallback. Reddit posts extract post text and top discussion comments. Substack and Medium articles strip ads and clutter, using headings or 2–4 sentence concepts. Sites with strict paywalls, captchas, or login walls cannot be extracted.
 - Concepts follow source headings, font differences and PDF bookmarks. Without clear section evidence, the book has one `Full document` concept. The app does not create summaries.
 - PDF extraction can change reading order. Check the retained original. A missing original PDF cannot be rebuilt from extracted text.
 - Reading, retained sources, saved practice and bundled media work offline. Narration needs an installed offline English voice; text stays available if the voice is missing.
@@ -87,7 +89,7 @@ Local release builds are unsigned unless signing is configured. Set `ANCHOR_KEYS
 ## Project structure
 
 - `app/src/main/java/com/anchorreader/`: app entry point, reading state, narration and source views.
-- `data/`: text/PDF extraction, source sections, book storage and practice validation.
+- `data/`: text/PDF extraction, source sections, book storage, web content extraction and routing (`data/web/`), and practice validation.
 - `chatgpt/`: browser sign-in, protected credentials and provider transport.
 - `ui/`: Library, book overview, import, practice and Settings screens.
 - `scripts/`: build, device QA and GitHub release tools.

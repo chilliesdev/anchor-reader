@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.OpenInBrowser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -136,6 +137,16 @@ fun SourceDialog(book: Book, initialPage: Int, onClose: () -> Unit) {
                         Text("Original AnchorReader demo diagram. Source: How offline web caching works, prepared example by AnchorReader.", color = Palette.Muted, fontSize = 13.sp)
                     } else if (book.pdfPath == null) SelectionContainer { Text(book.sourceText, lineHeight = 25.sp) }
                     if (book.author.isNotBlank()) Text("Author: ${book.author}", color = Palette.Muted)
+                    if (book.sourceUrl != null) {
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        TextButton(onClick = {
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(book.sourceUrl))) }
+                        }) {
+                            Icon(Icons.Outlined.OpenInBrowser, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Open original web page", fontSize = 12.sp)
+                        }
+                    }
                     Text("Keep only material you own or have permission to use.", color = Palette.Muted, fontSize = 12.sp)
                 }
                 Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Back to lesson") }
@@ -150,6 +161,7 @@ private fun rememberSaveablePage(id: String, initialPage: Int) = androidx.compos
 @Composable
 private fun TextSourceDialog(book: Book, onClose: () -> Unit) {
     val sections = remember(book.id) { book.sourceText.chunked(8000) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     ReaderDialog(onClose) {
         Surface(Modifier.fillMaxSize(), color = Palette.Canvas) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
@@ -157,7 +169,18 @@ private fun TextSourceDialog(book: Book, onClose: () -> Unit) {
                     Text(book.title, Modifier.weight(1f), fontFamily = FontFamily.Serif, fontSize = 25.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     IconButton(onClick = onClose) { Icon(Icons.Outlined.Close, "Close source") }
                 }
-                Text("Original book text", color = Palette.Teal, fontSize = 12.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (book.sourceUrl != null) "Web article" else "Original book text", color = Palette.Teal, fontSize = 12.sp)
+                    if (book.sourceUrl != null) {
+                        TextButton(onClick = {
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(book.sourceUrl))) }
+                        }) {
+                            Icon(Icons.Outlined.OpenInBrowser, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Open web page", fontSize = 12.sp)
+                        }
+                    }
+                }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(sections) { section -> SelectionContainer { Text(section, lineHeight = 25.sp) } }
                 }

@@ -8,4 +8,4 @@ The bundled `workshop_background.mp4` is an H.264 conversion of that source for 
 
 The prepared lesson and diagram are identified by the supplied product file as original AnchorReader demo material. No third-party paper or diagram is bundled. Imported material remains on the user's device.
 
-Dependencies include AndroidX, Jetpack Compose, Kotlin, and [PDFBox for Android](https://github.com/TomRoush/PdfBox-Android). AndroidX and PDFBox for Android use Apache License 2.0. Their upstream notices apply. Device voices belong to the installed speech engine; AnchorReader plays device speech and does not package or export voice recordings.
+Dependencies include AndroidX, Jetpack Compose, Kotlin, [PDFBox for Android](https://github.com/TomRoush/PdfBox-Android), and [Jsoup](https://jsoup.org/). AndroidX and PDFBox for Android use Apache License 2.0. Jsoup uses the MIT License. Their upstream notices apply. Device voices belong to the installed speech engine; AnchorReader plays device speech and does not package or export voice recordings.

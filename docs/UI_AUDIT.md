@@ -1,5 +1,17 @@
 # Android UI audit
 
+## Web and social reading platforms update
+
+30 October 2026. Independent rendered audit **PASSED**. Reviewed base `722ab2f` plus web extraction and UI changes. Tested configurations: phone 411dp (`Pixel_8`), narrow 320dp, font scale 1.0 and 2.0 (200% text scaling).
+
+Surfaces audited:
+- `NewBookScreen`: "Import web link" choice card, URL input dialog, validation states (empty, invalid protocol), and polite live region loading indicator.
+- `BookCard`: Web domain badge (`Palette.TealSoft` container with `Palette.Deep` icon and label, contrast ratio > 7:1).
+- `OverviewScreen`: 3-tier dynamic action layout (`threeFit`, `twoFit`, full-width vertical stack). All action labels ("Full text", "Source", "Open web page") remain on single lines at 320dp / 200% text scale.
+- `SourceDialog`: "Open original web page" external link action via Android `Intent.ACTION_VIEW`.
+
+All touch targets satisfy the >= 48dp minimum requirement. Defect with `OverviewActions` text wrapping at 200% font scale was resolved and verified via `OverviewActionsDeviceTest`. Durable evidence preserved in `docs/evidence/web-reader/`.
+
 ## Open Design update
 
 12 October 2026. Independent rendered audit **PASSED** for issue #8 and children #9–#25 on reviewed base `538ef6783b701752d5389f0c1feae5c8890e36ec` plus final design changes. Exact design export: `8f70e4aac64a7cd39e7f297bddb48180b5802750`. Actual native Library, Overview, Player, Quick check and Results screens were captured and viewed at phone 411dp, narrow 320dp, tablet 800dp, landscape and 200% text, including long content and partial practice states.

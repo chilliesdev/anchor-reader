@@ -35,4 +35,25 @@ class ReaderResultScopeTest {
         assertEquals(mapOf(0 to Outcome.CORRECT, 1 to Outcome.SKIPPED), state.copy(practiceSession = emptyList()).resultAnswers)
         assertTrue(state.currentProgress.visited.isEmpty())
     }
+
+    @Test
+    fun webArticleBookRetainsSourceUrlAndNavigatesToPlayer() {
+        val webBook = Book(
+            id = "web-1",
+            title = "Web Article",
+            author = "Web Author",
+            units = listOf(Concept("Section 1", listOf("Sentence 1."))),
+            sourceText = "Sentence 1.",
+            sourceUrl = "https://example.com/article"
+        )
+        val state = ReaderState(
+            books = listOf(webBook),
+            activeId = webBook.id,
+            screen = Screen.PLAYER,
+            autoplayRequested = true
+        )
+        assertEquals("https://example.com/article", state.book.sourceUrl)
+        assertEquals(Screen.PLAYER, state.screen)
+        assertTrue(state.autoplayRequested)
+    }
 }
