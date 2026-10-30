@@ -29,6 +29,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.anchorreader.supertonic.VoicePackState
 import com.anchorreader.ui.*
 
 class MainActivity : ComponentActivity() {
@@ -134,6 +135,15 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             if (foreground && dialog == null && latest.screen == Screen.PLAYER && latest.activeId == current.activeId &&
                 latest.playbackRequest == current.playbackRequest && latest.currentProgress.unitIndex == progress.unitIndex && latest.currentProgress.sentenceIndex == progress.sentenceIndex && model.nextSentence()) speakCurrent()
         }
+        val nextIndex = progress.sentenceIndex + 1
+        if (nextIndex < current.book.units[progress.unitIndex].sentences.size) {
+            narrator.prepareNext(current.book.units[progress.unitIndex].sentences[nextIndex])
+        }
+    }
+    LaunchedEffect(voice.packState) {
+        if (voice.packState is VoicePackState.Installed) {
+            model.refreshStorage()
+        }
     }
     LaunchedEffect(state.playbackRequest, state.autoplayRequested, voice.ready, voice.initializing, foreground, dialog) {
         if (state.autoplayRequested && !voice.initializing && !voice.ready) model.cancelPlaybackRequest()
@@ -202,9 +212,29 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
                         val summary = state.currentProgress.copy(answers = state.resultAnswers)
                         FinishScreen(state.book, summary, state.questions, { model.start(state.book, 0) }, { model.navigate(Screen.LIBRARY) }, { dialog = "source" }, checkComplete = state.practiceSession.isNotEmpty())
                     }
-                    Screen.SETTINGS -> SettingsScreen(state.stillMode, model::setStill, state.storedBytes, voice.status, { openVoiceSettings(context) }, model::resetProgress, model::closeSettings, onLicenses = { dialog = "licenses" },
-                        account = state.account, onConnect = model::connectChatGpt, onSignOut = model::signOutChatGpt,
-                        onCancelSignIn = model::cancelQuestions, onManageUsage = ::manageUsage, onResetConnection = model::resetChatGptConnection)
+                    Screen.SETTINGS -> SettingsScreen(
+                        stillMode = state.stillMode,
+                        onStill = model::setStill,
+                        storedBytes = state.storedBytes,
+                        voiceStatus = voice.status,
+                        onVoiceSettings = { openVoiceSettings(context) },
+                        onReset = model::resetProgress,
+                        onClose = model::closeSettings,
+                        onLicenses = { dialog = "licenses" },
+                        account = state.account,
+                        onConnect = model::connectChatGpt,
+                        onSignOut = model::signOutChatGpt,
+                        onCancelSignIn = model::cancelQuestions,
+                        onManageUsage = ::manageUsage,
+                        onResetConnection = model::resetChatGptConnection,
+                        voiceState = voice,
+                        onDownloadVoicePack = { narrator.downloadVoicePack() },
+                        onCancelVoicePack = { narrator.cancelVoicePackDownload() },
+                        onDeleteVoicePack = { narrator.deleteVoicePack(); model.refreshStorage() },
+                        onSetEnginePreference = { narrator.setEnginePreference(it) },
+                        onSetVoicePreference = { narrator.setVoicePreference(it) },
+                        onPreviewVoice = { narrator.previewVoice() },
+                    )
                     Screen.PLAYER -> Unit
                 }
             }

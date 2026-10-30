@@ -137,7 +137,20 @@ class ReaderViewModel internal constructor(application: Application, private val
         settings.edit().putBoolean("still", value).apply()
     }
 
-    private fun totalStoredBytes(): Long = repository.storedBytes() + practiceRepository.storedBytes()
+    private fun voicePackBytes(): Long {
+        val dir = java.io.File(getApplication<Application>().filesDir, "supertonic_voice")
+        if (!dir.exists()) return 0L
+        return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    private fun totalStoredBytes(): Long = repository.storedBytes() + practiceRepository.storedBytes() + voicePackBytes()
+
+    fun refreshStorage() {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) { totalStoredBytes() }
+            update { it.copy(storedBytes = bytes) }
+        }
+    }
 
     private fun persist(progress: Progress) {
         if (state.value.loading) return

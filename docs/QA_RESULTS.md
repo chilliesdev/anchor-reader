@@ -1,5 +1,16 @@
 # Android QA results
 
+## Supertonic 3 HD neural text-to-speech update
+
+30 October 2026. **PASSED for issue #39 (On-device Supertonic 3 HD neural text-to-speech).** Reviewed base `722ab2f` plus Supertonic engine, ONNX runtime integration, VoicePackService, dual-engine Narrator, and Settings UI.
+- Native debug build and Android lint passed with zero errors and zero warnings.
+- 218 JVM unit and integration tests passed cleanly (0 failures, 0 skipped).
+- 98 connected device tests passed on `emulator-5554` (API 35, 16 KB page-size kernel).
+- 16 KB ELF native page alignment verified on release APK across all ABIs (`zipalign -c -P 16 -v 4`).
+- Merged manifest verified: `ACCESS_NETWORK_STATE` removed and `ai.onnxruntime.TelemetryInitializer` stripped.
+- Security and tamper safeguards verified: outer archive SHA-256 and 7 inner file hashes verified; zip-slip path traversal and corrupt files rejected.
+- Dual-engine playback verified: 44.1 kHz PCM16 streaming via `AudioTrack`, speed adjustment (0.75x–2.0x), instant pause and flush, N+1 lookahead pre-synthesis, and 3-minute idle session release.
+
 ## Web and social reading platforms update
 
 30 October 2026. **PASSED for Web & Social Reading Platforms.** Reviewed base `722ab2f` plus web extraction and UI changes. Native debug build and Android lint passed with zero errors and zero warnings. 219 JVM unit tests passed with zero failures, zero errors, and zero skips.

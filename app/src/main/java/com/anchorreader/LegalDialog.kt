@@ -15,7 +15,14 @@ import androidx.compose.ui.unit.sp
 fun LegalDialog(onClose: () -> Unit) {
     val context = LocalContext.current
     val sections = remember {
-        listOf("legal/PDFBOX-NOTICE.txt", "legal/PDFBOX-LICENSE.txt", "legal/LICENSE-APACHE-2.0.txt").flatMap { name ->
+        listOf(
+            "legal/SUPERTONIC-LICENSE.txt",
+            "legal/ONNXRUNTIME-LICENSE.txt",
+            "legal/COMMONS-COMPRESS-NOTICE.txt",
+            "legal/PDFBOX-NOTICE.txt",
+            "legal/PDFBOX-LICENSE.txt",
+            "legal/LICENSE-APACHE-2.0.txt"
+        ).flatMap { name ->
             context.assets.open(name).bufferedReader().use { it.readText().chunked(6000) }
         }
     }
@@ -24,7 +31,7 @@ fun LegalDialog(onClose: () -> Unit) {
             Column(Modifier.safeDrawingPadding().padding(16.dp)) {
                 Text("Open-source licenses", style = MaterialTheme.typography.headlineSmall)
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 16.dp)) {
-                    item { Text("AndroidX, Jetpack Compose, Kotlin, and PDFBox for Android. Upstream notices follow.", modifier = Modifier.padding(bottom = 16.dp)) }
+                    item { Text("AndroidX, Jetpack Compose, Kotlin, PDFBox for Android, ONNX Runtime, Apache Commons Compress, and Supertonic 3. Upstream notices follow.", modifier = Modifier.padding(bottom = 16.dp)) }
                     items(sections) { text -> SelectionContainer { Text(text, fontSize = 12.sp, lineHeight = 18.sp) } }
                 }
                 Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Close licenses") }
