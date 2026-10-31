@@ -74,6 +74,45 @@ class SupertonicTextFrontendTest {
     }
 
     @Test
+    fun testTrailingDashesNormalizedWithoutSpuriousPunctuation() {
+        val dashEnd = "This clause ended with a dash -"
+        val preprocessed = frontend.preprocess(dashEnd, "en")
+        assertEquals("<en>This clause ended with a dash.</en>", preprocessed)
+
+        val emDashEnd = "This clause ended with an em dash —"
+        assertEquals("<en>This clause ended with an em dash.</en>", frontend.preprocess(emDashEnd, "en"))
+
+        val dashWithPunct = "This clause had punctuation before dash. -"
+        assertEquals("<en>This clause had punctuation before dash.</en>", frontend.preprocess(dashWithPunct, "en"))
+    }
+
+    @Test
+    fun testSplitStreamClausesUnder280Chars() {
+        // Multi-clause sentence under 280 chars must be split at natural prosodic boundaries
+        val text = "In machine learning and neural speech synthesis, natural sounding audio requires deep generative models."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(text, minClauseLen = 24, maxLen = 280)
+        assertEquals(2, chunks.size)
+        assertEquals("In machine learning and neural speech synthesis,", chunks[0])
+        assertEquals("natural sounding audio requires deep generative models.", chunks[1])
+    }
+
+    @Test
+    fun testSplitStreamClausesSemicolonAndDashes() {
+        val text = "Generative audio is powerful; running it offline requires careful pipelining — especially on phones."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(text, minClauseLen = 20, maxLen = 280)
+        assertTrue(chunks.size >= 2)
+        assertEquals("Generative audio is powerful;", chunks[0])
+    }
+
+    @Test
+    fun testSplitStreamClausesShortSentenceUnchanged() {
+        val short = "Short sentence."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(short, minClauseLen = 24, maxLen = 280)
+        assertEquals(1, chunks.size)
+        assertEquals("Short sentence.", chunks[0])
+    }
+
+    @Test
     fun testEncodingWithIndexer() {
         val text = "<en>abc</en>"
         val (tokens, mask) = frontend.encode(text)

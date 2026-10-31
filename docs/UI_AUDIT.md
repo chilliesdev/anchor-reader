@@ -1,5 +1,15 @@
 # Android UI audit
 
+## Supertonic 3 HD synthesis quality mode UI audit
+
+31 October 2026. Independent rendered UI audit **PASSED** for issue #42 on `emulator-5554` (API 37 `sdk_gphone16k_arm64`, 16 KB page-size kernel).
+- Audited states: "Synthesis quality" section under Device Narration in Settings; "Studio (5 steps)" radio card; "Fast (3 steps)" radio card; selection state toggling; system fallback state when HD voice disabled.
+- Viewports tested: 411dp standard portrait (1080x2400), 840x411dp landscape, 320dp narrow portrait, and 200% font scale accessibility.
+- All touch targets satisfy >= 48dp minimum bounds requirement. Card heights >= 54dp.
+- Responsive typography wraps cleanly without clipping or horizontal overflow on 320dp and 200% font scale.
+- 9/9 UI device tests passed in `SettingsUiDeviceTest`.
+- UI evidence screenshots preserved in artifact directory: `ui_audit_04_installed_hd_studio.png`, `ui_audit_04_installed_hd_fast.png`, `ui_audit_07_narrow_320dp.png`, `ui_audit_08_font_scale_200.png`, `ui_audit_09_landscape.png`.
+
 ## Supertonic 3 HD neural text-to-speech UI audit
 
 30 October 2026. Independent rendered UI audit **PASSED** for issue #39 on `emulator-5554` (API 35, 16 KB page-size kernel).

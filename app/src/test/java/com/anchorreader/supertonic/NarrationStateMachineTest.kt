@@ -17,6 +17,21 @@ class NarrationStateMachineTest {
         assertEquals(VoicePackState.NotInstalled, defaultState.packState)
         assertTrue(defaultState.useHd)
         assertEquals("F1", defaultState.selectedVoice)
+        assertEquals(SupertonicQualityMode.STUDIO_5_STEP, defaultState.qualityMode)
+    }
+
+    @Test
+    fun testVoiceStateQualityModeSwitch() {
+        val state = VoiceState(qualityMode = SupertonicQualityMode.STUDIO_5_STEP)
+        val fastState = state.copy(qualityMode = SupertonicQualityMode.FAST_3_STEP)
+        assertEquals(SupertonicQualityMode.FAST_3_STEP, fastState.qualityMode)
+
+        // Cache keys must differ when qualityMode changes
+        val keyStudio = "${state.selectedVoice}:${state.speed}:${state.qualityMode.name}:Sample text"
+        val keyFast = "${fastState.selectedVoice}:${fastState.speed}:${fastState.qualityMode.name}:Sample text"
+        assertNotEquals(keyStudio, keyFast)
+        assertEquals("F1:1.0:STUDIO_5_STEP:Sample text", keyStudio)
+        assertEquals("F1:1.0:FAST_3_STEP:Sample text", keyFast)
     }
 
     @Test

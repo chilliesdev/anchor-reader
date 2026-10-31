@@ -3,24 +3,40 @@ package com.anchorreader.supertonic
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtLoggingLevel
+import ai.onnxruntime.OrtProvider
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.providers.NNAPIFlags
+import android.os.Build
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
+import java.util.EnumSet
 import java.util.Random
 
 class SupertonicEngine(
     private val voiceDir: File,
-    private val intraOpThreads: Int = 2,
+    val intraOpThreads: Int = defaultIntraOpThreads(),
+    val enableNnapi: Boolean = true,
 ) : AutoCloseable {
 
-    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    private val sessionOptions = OrtSession.SessionOptions().apply {
-        setIntraOpNumThreads(intraOpThreads)
-        setInterOpNumThreads(1)
-        setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING)
+    companion object {
+        fun defaultIntraOpThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int =
+            (cores / 2).coerceIn(2, 4)
     }
+
+    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+    private var sessionOptions: OrtSession.SessionOptions? = null
+
+    var activeProvider: String = "CPU"
+        private set
 
     val sampleRate: Int
     val baseChunkSize: Int
@@ -30,12 +46,14 @@ class SupertonicEngine(
     val voiceParser: SupertonicVoiceParser
     val frontend: SupertonicTextFrontend
 
-    private val dpSession: OrtSession
-    private val textEncSession: OrtSession
-    private val vectorEstSession: OrtSession
-    private val vocoderSession: OrtSession
+    private var dpSession: OrtSession? = null
+    private var textEncSession: OrtSession? = null
+    private var vectorEstSession: OrtSession? = null
+    private var vocoderSession: OrtSession? = null
 
-    private val random = Random(42)
+    private val inferenceMutex = Mutex()
+    @Volatile
+    private var isClosed = false
 
     init {
         val ttsJson = JSONObject(File(voiceDir, "tts.json").readText())
@@ -50,26 +68,97 @@ class SupertonicEngine(
         val indexerBytes = File(voiceDir, "unicode_indexer.bin").readBytes()
         frontend = SupertonicTextFrontend(SupertonicTextFrontend.loadIndexer(indexerBytes))
 
-        dpSession = env.createSession(File(voiceDir, "duration_predictor.int8.onnx").absolutePath, sessionOptions)
-        textEncSession = env.createSession(File(voiceDir, "text_encoder.int8.onnx").absolutePath, sessionOptions)
-        vectorEstSession = env.createSession(File(voiceDir, "vector_estimator.int8.onnx").absolutePath, sessionOptions)
-        vocoderSession = env.createSession(File(voiceDir, "vocoder.int8.onnx").absolutePath, sessionOptions)
+        initSessions()
     }
 
-    fun synthesize(text: String, voiceName: String = SupertonicManifest.DEFAULT_VOICE, speed: Float = 1.0f): ShortArray {
-        val clauses = SupertonicTextFrontend.splitClauses(text)
-        if (clauses.isEmpty()) return ShortArray(0)
+    private fun isNnapiSupported(): Boolean {
+        return try {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 &&
+                OrtEnvironment.getAvailableProviders().contains(OrtProvider.NNAPI)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun createSessionOptions(useNnapi: Boolean): OrtSession.SessionOptions {
+        val opts = OrtSession.SessionOptions()
+        opts.setIntraOpNumThreads(intraOpThreads)
+        opts.setInterOpNumThreads(1)
+        opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+        opts.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING)
+        if (useNnapi) {
+            try {
+                opts.addNnapi(EnumSet.of(NNAPIFlags.CPU_DISABLED))
+            } catch (_: Throwable) { }
+        }
+        return opts
+    }
+
+    private fun initSessions() {
+        if (enableNnapi && isNnapiSupported()) {
+            try {
+                val opts = createSessionOptions(useNnapi = true)
+                sessionOptions = opts
+                dpSession = env.createSession(File(voiceDir, "duration_predictor.int8.onnx").absolutePath, opts)
+                textEncSession = env.createSession(File(voiceDir, "text_encoder.int8.onnx").absolutePath, opts)
+                vectorEstSession = env.createSession(File(voiceDir, "vector_estimator.int8.onnx").absolutePath, opts)
+                vocoderSession = env.createSession(File(voiceDir, "vocoder.int8.onnx").absolutePath, opts)
+                activeProvider = "NNAPI"
+                return
+            } catch (_: Throwable) {
+                closeSessions()
+            }
+        }
+
+        fallbackToCpu()
+    }
+
+    private fun fallbackToCpu() {
+        closeSessions()
+        val opts = createSessionOptions(useNnapi = false)
+        sessionOptions = opts
+        dpSession = env.createSession(File(voiceDir, "duration_predictor.int8.onnx").absolutePath, opts)
+        textEncSession = env.createSession(File(voiceDir, "text_encoder.int8.onnx").absolutePath, opts)
+        vectorEstSession = env.createSession(File(voiceDir, "vector_estimator.int8.onnx").absolutePath, opts)
+        vocoderSession = env.createSession(File(voiceDir, "vocoder.int8.onnx").absolutePath, opts)
+        activeProvider = "CPU"
+    }
+
+    fun synthesizeStream(
+        text: String,
+        voiceName: String = SupertonicManifest.DEFAULT_VOICE,
+        speed: Float = 1.0f,
+        qualityMode: SupertonicQualityMode = SupertonicQualityMode.STUDIO_5_STEP
+    ): Flow<ShortArray> = flow {
+        val clauses = SupertonicTextFrontend.splitStreamClauses(text)
+        if (clauses.isEmpty()) return@flow
 
         val sid = SupertonicVoiceParser.sidForVoice(voiceName)
         val slice = voiceParser.getVoiceSlice(sid)
 
-        val buffers = mutableListOf<ShortArray>()
         for (clause in clauses) {
-            val audio = synthesizeChunk(clause, slice, speed)
-            if (audio.isNotEmpty()) {
-                buffers.add(audio)
+            currentCoroutineContext().ensureActive()
+            val chunkAudio = inferenceMutex.withLock {
+                currentCoroutineContext().ensureActive()
+                synthesizeChunkWithFallback(clause, slice, speed, qualityMode)
+            }
+            if (chunkAudio.isNotEmpty()) {
+                emit(chunkAudio)
             }
         }
+    }
+
+    suspend fun synthesize(
+        text: String,
+        voiceName: String = SupertonicManifest.DEFAULT_VOICE,
+        speed: Float = 1.0f,
+        qualityMode: SupertonicQualityMode = SupertonicQualityMode.STUDIO_5_STEP
+    ): ShortArray {
+        val buffers = mutableListOf<ShortArray>()
+        synthesizeStream(text, voiceName, speed, qualityMode).collect {
+            buffers.add(it)
+        }
+        if (buffers.isEmpty()) return ShortArray(0)
         val totalLen = buffers.sumOf { it.size }
         val result = ShortArray(totalLen)
         var offset = 0
@@ -80,11 +169,45 @@ class SupertonicEngine(
         return result
     }
 
-    private fun synthesizeChunk(chunk: String, slice: SupertonicVoiceParser.VoiceStyleSlice, speed: Float): ShortArray {
+    private suspend fun synthesizeChunkWithFallback(
+        chunk: String,
+        slice: SupertonicVoiceParser.VoiceStyleSlice,
+        speed: Float,
+        qualityMode: SupertonicQualityMode
+    ): ShortArray {
+        if (isClosed) return ShortArray(0)
+        return if (activeProvider == "NNAPI") {
+            try {
+                synthesizeChunk(chunk, slice, speed, qualityMode)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                fallbackToCpu()
+                synthesizeChunk(chunk, slice, speed, qualityMode)
+            }
+        } else {
+            synthesizeChunk(chunk, slice, speed, qualityMode)
+        }
+    }
+
+    private suspend fun synthesizeChunk(
+        chunk: String,
+        slice: SupertonicVoiceParser.VoiceStyleSlice,
+        speed: Float,
+        qualityMode: SupertonicQualityMode
+    ): ShortArray {
+        if (isClosed) return ShortArray(0)
+        currentCoroutineContext().ensureActive()
+
         val preprocessed = frontend.preprocess(chunk, "en")
         if (preprocessed.isEmpty()) return ShortArray(0)
         val (tokens, mask) = frontend.encode(preprocessed)
         val seqLen = tokens.size.toLong()
+
+        val dpSess = dpSession ?: return ShortArray(0)
+        val textEncSess = textEncSession ?: return ShortArray(0)
+        val vectorEstSess = vectorEstSession ?: return ShortArray(0)
+        val vocoderSess = vocoderSession ?: return ShortArray(0)
 
         // 1. Duration Predictor
         val dpTextIds = OnnxTensor.createTensor(env, LongBuffer.wrap(tokens), longArrayOf(1, seqLen))
@@ -92,12 +215,12 @@ class SupertonicEngine(
         val dpTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
 
         val dpInputs = mapOf(
-            findInput(dpSession, "text", "id") to dpTextIds,
-            findInput(dpSession, "style", "dp") to dpStyleDp,
-            findInput(dpSession, "mask") to dpTextMask,
+            findInput(dpSess, "text", "id") to dpTextIds,
+            findInput(dpSess, "style", "dp") to dpStyleDp,
+            findInput(dpSess, "mask") to dpTextMask,
         )
         val durSeconds: Float
-        dpSession.run(dpInputs).use { out ->
+        dpSess.run(dpInputs).use { out ->
             val tensor = out.get(0) as OnnxTensor
             val buf = tensor.floatBuffer
             durSeconds = buf.get(0)
@@ -117,39 +240,41 @@ class SupertonicEngine(
         val teTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
 
         val teInputs = mapOf(
-            findInput(textEncSession, "text", "id") to teTextIds,
-            findInput(textEncSession, "style", "ttl") to teStyleTtl,
-            findInput(textEncSession, "mask") to teTextMask,
+            findInput(textEncSess, "text", "id") to teTextIds,
+            findInput(textEncSess, "style", "ttl") to teStyleTtl,
+            findInput(textEncSess, "mask") to teTextMask,
         )
         val textEmbTensor: OnnxTensor
-        val textEncResult = textEncSession.run(teInputs)
+        val textEncResult = textEncSess.run(teInputs)
         textEmbTensor = textEncResult.get(0) as OnnxTensor
         teTextIds.close(); teStyleTtl.close(); teTextMask.close()
 
-        // 3. Vector Estimator (5 flow matching steps)
-        val xtFlat = FloatArray(latentTotalElements) { (random.nextGaussian() * 0.5f).toFloat() }
+        // 3. Vector Estimator (parameterized flow matching steps: 3 or 5)
+        val deterministicRandom = Random(42L)
+        val xtFlat = FloatArray(latentTotalElements) { (deterministicRandom.nextGaussian() * 0.5f).toFloat() }
         val latentMaskArray = FloatArray(latentLen) { 1.0f }
-        val numSteps = 5
+        val numSteps = qualityMode.steps
         val totalStepTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(numSteps.toFloat())), longArrayOf(1))
         val latentMaskTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(latentMaskArray), longArrayOf(1, 1, latentLen.toLong()))
         val veStyleTtl = OnnxTensor.createTensor(env, FloatBuffer.wrap(slice.ttlData), slice.ttlShape)
         val veTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
 
         for (step in 0 until numSteps) {
+            currentCoroutineContext().ensureActive()
             val noisyLatentTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(xtFlat), longArrayOf(1, latentDimTotal.toLong(), latentLen.toLong()))
             val currentStepTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(step.toFloat())), longArrayOf(1))
 
             val veInputs = mapOf(
-                findInput(vectorEstSession, "noisy", "latent", "x") to noisyLatentTensor,
-                findInput(vectorEstSession, "current", "step") to currentStepTensor,
-                findInput(vectorEstSession, "text_emb", "emb") to textEmbTensor,
-                findInput(vectorEstSession, "style", "ttl") to veStyleTtl,
-                findInput(vectorEstSession, "latent_mask") to latentMaskTensor,
-                findInput(vectorEstSession, "text_mask") to veTextMask,
-                findInput(vectorEstSession, "total") to totalStepTensor,
+                findInput(vectorEstSess, "noisy", "latent", "x") to noisyLatentTensor,
+                findInput(vectorEstSess, "current", "step") to currentStepTensor,
+                findInput(vectorEstSess, "text_emb", "emb") to textEmbTensor,
+                findInput(vectorEstSess, "style", "ttl") to veStyleTtl,
+                findInput(vectorEstSess, "latent_mask") to latentMaskTensor,
+                findInput(vectorEstSess, "text_mask") to veTextMask,
+                findInput(vectorEstSess, "total") to totalStepTensor,
             )
 
-            vectorEstSession.run(veInputs).use { out ->
+            vectorEstSess.run(veInputs).use { out ->
                 val denoised = out.get(0) as OnnxTensor
                 denoised.floatBuffer.get(xtFlat)
             }
@@ -164,10 +289,11 @@ class SupertonicEngine(
         veTextMask.close()
 
         // 4. Vocoder
+        currentCoroutineContext().ensureActive()
         val finalLatentTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(xtFlat), longArrayOf(1, latentDimTotal.toLong(), latentLen.toLong()))
-        val vocInputs = mapOf(vocoderSession.inputNames.first() to finalLatentTensor)
+        val vocInputs = mapOf(vocoderSess.inputNames.first() to finalLatentTensor)
         val pcm16: ShortArray
-        vocoderSession.run(vocInputs).use { out ->
+        vocoderSess.run(vocInputs).use { out ->
             val wavTensor = out.get(0) as OnnxTensor
             val wavBuf = wavTensor.floatBuffer
             val totalSamples = wavBuf.remaining()
@@ -195,11 +321,21 @@ class SupertonicEngine(
     }
 
     override fun close() {
-        dpSession.close()
-        textEncSession.close()
-        vectorEstSession.close()
-        vocoderSession.close()
-        sessionOptions.close()
+        isClosed = true
+        closeSessions()
         env.close()
+    }
+
+    private fun closeSessions() {
+        try { dpSession?.close() } catch (_: Throwable) {}
+        try { textEncSession?.close() } catch (_: Throwable) {}
+        try { vectorEstSession?.close() } catch (_: Throwable) {}
+        try { vocoderSession?.close() } catch (_: Throwable) {}
+        try { sessionOptions?.close() } catch (_: Throwable) {}
+        dpSession = null
+        textEncSession = null
+        vectorEstSession = null
+        vocoderSession = null
+        sessionOptions = null
     }
 }
