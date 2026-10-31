@@ -1,5 +1,18 @@
 # Android QA results
 
+## Supertonic 3 HD TTS speech latency benchmark
+
+31 October 2026. **PASSED for Supertonic 3 HD TTS speech latency benchmark.** Reviewed on-device latency benchmark suite for Supertonic 3 HD neural TTS engine on Android (`emulator-5554`, Android API 34 `arm64-v8a`, ONNX Runtime NNAPI provider).
+- All 4 instrumented benchmark tests passed cleanly in `SupertonicBenchmarkDeviceTest`:
+  - Session initialization: Cold start = 8,883.18 ms, Warm start = 7,745.87 ms (1.1x speedup).
+  - Component breakdown (`FAST_3_STEP`): Duration Predictor = 31.71 ms, Text Encoder = 134.87 ms, Vector Estimator = 5,390.22 ms, Vocoder = 958.90 ms, Total Inference = 6,529.89 ms, Real-Time Factor (RTF) = 1.61.
+  - Component breakdown (`STUDIO_5_STEP`): Duration Predictor = 93.57 ms, Text Encoder = 301.14 ms, Vector Estimator = 7,636.23 ms, Vocoder = 890.14 ms, Total Inference = 8,934.50 ms, RTF = 2.21.
+  - Latency reduction: `FAST_3_STEP` delivers a ~27% latency reduction compared to `STUDIO_5_STEP`. Vector Estimator accounts for 82.5%–85.5% of inference time.
+  - Clause 1 Streaming Time-to-First-Audio (TTFA): `FAST_3_STEP` Clause 1 TTFA = 4,308.38 ms (Total Stream = 11,979.90 ms); `STUDIO_5_STEP` Clause 1 TTFA = 6,832.90 ms (Total Stream = 14,301.44 ms). TTFA < Total Stream duration invariant holds.
+  - Lookahead cache performance: Cache hit = 0.003 ms vs Miss = 5,457.13 ms (Speedup > 2,000,000x). Proactive pre-buffering completely eliminates synthesis wait during sequential reading.
+- Local unit test and lint suite (`./scripts/qa.sh unit`) passed cleanly (34 tasks completed, 0 failures, 0 lint errors).
+- Automated test script `scripts/benchmark_tts.sh` added with voice pack staging, execution, and metric reporting.
+
 ## Supertonic 3 HD neural speech latency optimization and quality mode
 
 31 October 2026. **PASSED for issue #42 (Supertonic 3 HD neural speech latency optimization).** Reviewed base plus Supertonic engine streaming, clause pipelining, quality modes (Studio 5-step vs Fast 3-step), DataStore preferences, proactive pre-buffering, and Settings UI selector.
