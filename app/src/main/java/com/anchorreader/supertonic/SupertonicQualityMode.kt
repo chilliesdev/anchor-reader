@@ -9,8 +9,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -41,8 +42,8 @@ class SupertonicQualityStore(
         }
     }
 
-    fun closeForTest() {
-        testScope?.cancel()
+    suspend fun closeForTest() {
+        testScope?.coroutineContext?.get(Job)?.cancelAndJoin()
     }
 
     companion object {
