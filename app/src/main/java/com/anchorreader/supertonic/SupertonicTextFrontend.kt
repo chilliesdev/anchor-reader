@@ -26,6 +26,13 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
 
         if (s.isEmpty()) return ""
 
+        // Normalize trailing em/en/hyphen dashes so clauses do not receive spurious ".-" punctuation
+        while (s.endsWith("-") || s.endsWith("–") || s.endsWith("—")) {
+            s = s.dropLast(1).trimEnd()
+        }
+
+        if (s.isEmpty()) return ""
+
         // 6. Ensure ending punctuation
         val last = s.last()
         val endsWithPunct = last in setOf('.', '!', '?', ';', ':', ',', '\'', '"', ')', ']', '}')
@@ -93,6 +100,74 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
             }
             if (remaining.isNotEmpty()) {
                 chunks.add(remaining)
+            }
+            return chunks
+        }
+
+        fun splitStreamClauses(
+            text: String,
+            minClauseLen: Int = 24,
+            maxLen: Int = MAX_CHUNK_LEN
+        ): List<String> {
+            val trimmed = text.trim()
+            if (trimmed.isEmpty()) return emptyList()
+            if (trimmed.length <= minClauseLen) return listOf(trimmed)
+
+            val delimiters = listOf("; ", ": ", ". ", "! ", "? ", " — ", " – ", " - ", ", ")
+            val chunks = mutableListOf<String>()
+            var remaining = trimmed
+
+            while (remaining.isNotEmpty()) {
+                val searchLimit = minOf(remaining.length, maxLen)
+                var splitPoint: Pair<Int, Int>? = null
+
+                for (i in minClauseLen until searchLimit) {
+                    for (delim in delimiters) {
+                        if (remaining.startsWith(delim, i)) {
+                            val clauseEnd = if (delim.startsWith(" ")) i else i + 1
+                            val nextStart = i + delim.length
+                            if (remaining.length - nextStart >= 16 || remaining.length > maxLen) {
+                                splitPoint = clauseEnd to nextStart
+                                break
+                            }
+                        }
+                    }
+                    if (splitPoint != null) break
+                }
+
+                if (splitPoint != null) {
+                    val chunk = remaining.substring(0, splitPoint.first).trim()
+                    if (chunk.isNotEmpty()) chunks.add(chunk)
+                    remaining = remaining.substring(splitPoint.second).trim()
+                } else if (remaining.length <= maxLen) {
+                    chunks.add(remaining)
+                    break
+                } else {
+                    val window = remaining.substring(0, maxLen)
+                    var fallbackEnd = -1
+                    var fallbackNext = -1
+                    for (delim in delimiters) {
+                        val idx = window.lastIndexOf(delim)
+                        if (idx in 0 until maxLen) {
+                            fallbackEnd = if (delim.startsWith(" ")) idx else idx + 1
+                            fallbackNext = idx + delim.length
+                            break
+                        }
+                    }
+                    if (fallbackEnd == -1) {
+                        val spaceIdx = window.lastIndexOf(' ')
+                        if (spaceIdx > 0) {
+                            fallbackEnd = spaceIdx
+                            fallbackNext = spaceIdx + 1
+                        } else {
+                            fallbackEnd = maxLen
+                            fallbackNext = maxLen
+                        }
+                    }
+                    val chunk = remaining.substring(0, fallbackEnd).trim()
+                    if (chunk.isNotEmpty()) chunks.add(chunk)
+                    remaining = remaining.substring(fallbackNext).trim()
+                }
             }
             return chunks
         }

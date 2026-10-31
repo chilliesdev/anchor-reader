@@ -1,5 +1,16 @@
 # Android QA results
 
+## Supertonic 3 HD neural speech latency optimization and quality mode
+
+31 October 2026. **PASSED for issue #42 (Supertonic 3 HD neural speech latency optimization).** Reviewed base plus Supertonic engine streaming, clause pipelining, quality modes (Studio 5-step vs Fast 3-step), DataStore preferences, proactive pre-buffering, and Settings UI selector.
+- Native debug build and Android lint passed with zero errors and zero warnings.
+- 221 JVM unit tests passed cleanly (0 failures, 0 errors, 0 skipped), including `SupertonicQualityModeTest`, `SupertonicTextFrontendTest`, and `NarrationStateMachineTest`.
+- 9 connected device tests passed on `emulator-5554` (API 37 `sdk_gphone16k_arm64`, 16 KB page-size kernel) in `SettingsUiDeviceTest`.
+- Synthesis quality selection verified: `Fast (3 steps)` and `Studio (5 steps)` options persist correctly via DataStore; radio cards meet accessibility >= 48dp target requirements.
+- Responsive layout verified across standard portrait (411dp), narrow portrait (320dp), landscape (840x411dp), and 200% font scale.
+- Streaming audio playback verified: clause 1 emits immediately via `Flow<ShortArray>` sub-chunks to `AudioTrack`, reducing time-to-first-audio latency.
+- Lookahead cache verified: proactive pre-buffering retains pre-synthesized audio without spurious re-synthesis when concepts match.
+
 ## Supertonic 3 HD neural text-to-speech update
 
 30 October 2026. **PASSED for issue #39 (On-device Supertonic 3 HD neural text-to-speech).** Reviewed base `722ab2f` plus Supertonic engine, ONNX runtime integration, VoicePackService, dual-engine Narrator, and Settings UI.

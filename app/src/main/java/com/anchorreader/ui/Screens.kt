@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import com.anchorreader.VoiceState
+import com.anchorreader.supertonic.SupertonicQualityMode
 import com.anchorreader.supertonic.VoicePackState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
@@ -705,6 +706,7 @@ fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: 
     onDeleteVoicePack: () -> Unit = {},
     onSetEnginePreference: (Boolean) -> Unit = {},
     onSetVoicePreference: (String) -> Unit = {},
+    onSetQualityMode: (SupertonicQualityMode) -> Unit = {},
     onPreviewVoice: () -> Unit = {}) {
     var confirmReset by remember { mutableStateOf(false) }
     var confirmConnectionReset by remember { mutableStateOf(false) }
@@ -765,6 +767,39 @@ fun SettingsScreen(stillMode: Boolean, onStill: (Boolean) -> Unit, storedBytes: 
                         Switch(useHd, onSetEnginePreference, Modifier.semantics { contentDescription = "HD offline voice" })
                     }
                     if (useHd) {
+                        Text("Synthesis quality", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        val currentQuality = voiceState?.qualityMode ?: SupertonicQualityMode.STUDIO_5_STEP
+                        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SupertonicQualityMode.entries.forEach { mode ->
+                                val selected = mode == currentQuality
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .heightIn(min = 54.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (selected) Palette.TealSoft else Palette.Surface)
+                                        .border(1.dp, if (selected) Palette.Teal else Palette.Line, RoundedCornerShape(12.dp))
+                                        .selectable(
+                                            selected = selected,
+                                            role = Role.RadioButton,
+                                            onClick = { onSetQualityMode(mode) }
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    RadioButton(
+                                        selected = selected,
+                                        onClick = null,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(mode.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        Text(mode.subtitle, fontSize = 12.sp, color = Palette.Muted)
+                                    }
+                                }
+                            }
+                        }
+
                         Text("Voice selection", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         val selected = voiceState?.selectedVoice ?: "F1"
                         VoiceSelectorRow("Female voices", listOf("F1", "F2", "F3", "F4", "F5"), selected, onSetVoicePreference)

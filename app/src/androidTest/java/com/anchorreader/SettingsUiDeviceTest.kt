@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.anchorreader.supertonic.SupertonicQualityMode
 import com.anchorreader.supertonic.VoicePackState
 import com.anchorreader.ui.AnchorTheme
 import com.anchorreader.ui.SettingsScreen
@@ -135,10 +136,11 @@ class SettingsUiDeviceTest {
 
     @Test
     fun settingsInstalledStateDisplaysVoicesEngineToggleAndPreview() {
-        var voiceSelected = "F1"
-        var previewed = false
-        var engineToggled = true
-        var deleteConfirmed = false
+        var voiceSelected by mutableStateOf("F1")
+        var previewed by mutableStateOf(false)
+        var engineToggled by mutableStateOf(true)
+        var deleteConfirmed by mutableStateOf(false)
+        var qualityModeSelected by mutableStateOf(SupertonicQualityMode.STUDIO_5_STEP)
 
         compose.setContent {
             AnchorTheme {
@@ -155,10 +157,12 @@ class SettingsUiDeviceTest {
                         status = "Offline HD voice ready · $voiceSelected",
                         packState = VoicePackState.Installed(129L * 1024 * 1024),
                         useHd = engineToggled,
-                        selectedVoice = voiceSelected
+                        selectedVoice = voiceSelected,
+                        qualityMode = qualityModeSelected
                     ),
                     onSetEnginePreference = { engineToggled = it },
                     onSetVoicePreference = { voiceSelected = it },
+                    onSetQualityMode = { qualityModeSelected = it },
                     onPreviewVoice = { previewed = true },
                     onDeleteVoicePack = { deleteConfirmed = true }
                 )
@@ -167,6 +171,25 @@ class SettingsUiDeviceTest {
 
         compose.onNodeWithText("HD offline voice").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Using Supertonic 3 HD neural speech.").performScrollTo().assertIsDisplayed()
+
+        // Synthesis quality options
+        compose.onNodeWithText("Synthesis quality").performScrollTo().assertIsDisplayed()
+        val studioOption = compose.onNodeWithText("Studio (5 steps)")
+        val fastOption = compose.onNodeWithText("Fast (3 steps)")
+        studioOption.performScrollTo().assertIsDisplayed()
+        fastOption.performScrollTo().assertIsDisplayed()
+        assertTouchTargetSize(studioOption, "Studio (5 steps)")
+        assertTouchTargetSize(fastOption, "Fast (3 steps)")
+
+        DeviceEvidence.capture("ui_audit_04_installed_hd_studio")
+
+        // Select Fast (3 steps)
+        fastOption.performClick()
+        compose.waitForIdle()
+        assertEquals(SupertonicQualityMode.FAST_3_STEP, qualityModeSelected)
+        DeviceEvidence.capture("ui_audit_04_installed_hd_fast")
+        DeviceEvidence.capture("ui_audit_04_installed_hd")
+
         compose.onNodeWithText("Voice selection").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Female voices").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Male voices").performScrollTo().assertIsDisplayed()
@@ -183,14 +206,14 @@ class SettingsUiDeviceTest {
         deleteButton.performScrollTo().assertIsDisplayed()
         assertTouchTargetSize(deleteButton, "Delete HD voices")
 
-        DeviceEvidence.capture("ui_audit_04_installed_hd")
-
         // Click a different voice
         compose.onNodeWithContentDescription("Voice M3").performScrollTo().performClick()
+        compose.waitForIdle()
         assertEquals("M3", voiceSelected)
 
         // Click delete to open confirmation dialog
         deleteButton.performClick()
+        compose.waitForIdle()
         compose.onNodeWithText("Delete HD voices?").assertIsDisplayed()
         compose.onNodeWithText("This frees ~129 MB of storage. Narration will switch to your device's built-in voice. Your books, reading positions, and saved questions stay.").assertIsDisplayed()
 
@@ -198,12 +221,15 @@ class SettingsUiDeviceTest {
 
         // Dismiss dialog
         compose.onNodeWithText("Keep voices").performClick()
+        compose.waitForIdle()
         compose.onNodeWithText("Delete HD voices?").assertDoesNotExist()
         assertFalse("Delete was dismissed", deleteConfirmed)
 
         // Re-open and confirm
         deleteButton.performClick()
+        compose.waitForIdle()
         compose.onAllNodesWithText("Delete HD voices")[1].performClick()
+        compose.waitForIdle()
         assertTrue("Delete was confirmed", deleteConfirmed)
     }
 
@@ -259,7 +285,8 @@ class SettingsUiDeviceTest {
                                 status = "Offline HD voice ready · F1",
                                 packState = VoicePackState.Installed(129L * 1024 * 1024),
                                 useHd = true,
-                                selectedVoice = "F1"
+                                selectedVoice = "F1",
+                                qualityMode = SupertonicQualityMode.STUDIO_5_STEP
                             )
                         )
                     }
@@ -269,6 +296,9 @@ class SettingsUiDeviceTest {
 
         compose.onNodeWithText("Settings").assertIsDisplayed()
         compose.onNodeWithText("HD offline voice").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Synthesis quality").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Studio (5 steps)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Fast (3 steps)").performScrollTo().assertIsDisplayed()
         DeviceEvidence.capture("ui_audit_07_narrow_320dp")
 
         listOf("F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5").forEach { voiceId ->
@@ -297,7 +327,8 @@ class SettingsUiDeviceTest {
                                 status = "Offline HD voice ready · F1",
                                 packState = VoicePackState.Installed(129L * 1024 * 1024),
                                 useHd = true,
-                                selectedVoice = "F1"
+                                selectedVoice = "F1",
+                                qualityMode = SupertonicQualityMode.STUDIO_5_STEP
                             )
                         )
                     }
@@ -307,6 +338,9 @@ class SettingsUiDeviceTest {
 
         compose.onNodeWithText("Settings").assertIsDisplayed()
         compose.onNodeWithText("HD offline voice").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Synthesis quality").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Studio (5 steps)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Fast (3 steps)").performScrollTo().assertIsDisplayed()
         DeviceEvidence.capture("ui_audit_08_font_scale_200")
 
         listOf("F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5").forEach { voiceId ->
@@ -335,7 +369,8 @@ class SettingsUiDeviceTest {
                                 status = "Offline HD voice ready · F1",
                                 packState = VoicePackState.Installed(129L * 1024 * 1024),
                                 useHd = true,
-                                selectedVoice = "F1"
+                                selectedVoice = "F1",
+                                qualityMode = SupertonicQualityMode.STUDIO_5_STEP
                             )
                         )
                     }
@@ -345,6 +380,9 @@ class SettingsUiDeviceTest {
 
         compose.onNodeWithText("Settings").assertIsDisplayed()
         compose.onNodeWithText("HD offline voice").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Synthesis quality").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Studio (5 steps)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Fast (3 steps)").performScrollTo().assertIsDisplayed()
         DeviceEvidence.capture("ui_audit_09_landscape")
 
         listOf("F1", "F2", "F3", "F4", "F5").forEach { voiceId ->

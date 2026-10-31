@@ -15,12 +15,18 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.anchorreader.supertonic.SupertonicEngine
 import com.anchorreader.supertonic.SupertonicManifest
+import com.anchorreader.supertonic.SupertonicQualityMode
+import com.anchorreader.supertonic.SupertonicQualityStore
 import com.anchorreader.supertonic.VoicePackService
 import com.anchorreader.supertonic.VoicePackState
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flowOf
 import java.util.Locale
 
 data class VoiceState(
@@ -32,6 +38,7 @@ data class VoiceState(
     val packState: VoicePackState = VoicePackState.NotInstalled,
     val useHd: Boolean = true,
     val selectedVoice: String = "F1",
+    val qualityMode: SupertonicQualityMode = SupertonicQualityMode.STUDIO_5_STEP,
 )
 
 interface Narration {
@@ -42,6 +49,7 @@ interface Narration {
     fun prepareNext(text: String) {}
     fun setEnginePreference(useHd: Boolean) {}
     fun setVoicePreference(voice: String) {}
+    fun setQualityMode(mode: SupertonicQualityMode) {}
     fun downloadVoicePack() {}
     fun cancelVoicePackDownload() {}
     fun deleteVoicePack() {}
@@ -49,7 +57,10 @@ interface Narration {
 }
 
 /** Dual-engine speech: Supertonic 3 HD neural TTS when installed and enabled, with system TextToSpeech baseline & fallback. */
-class Narrator(private val context: Context) : Narration, AutoCloseable {
+class Narrator(
+    private val context: Context,
+    private val qualityStore: SupertonicQualityStore = SupertonicQualityStore.getInstance(context),
+) : Narration, AutoCloseable {
     private val handler = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val preferences = context.getSharedPreferences("supertonic_prefs", Context.MODE_PRIVATE)
@@ -87,6 +98,7 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
     private var playbackJob: Job? = null
     private var lookaheadJob: Job? = null
     private var lookaheadCache: Pair<String, ShortArray>? = null
+    private var lookaheadTargetKey: String? = null
     private var idleTimeoutJob: Job? = null
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -104,6 +116,23 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
     init {
         createEngine(context)
         observeVoicePackState()
+        observeQualityMode()
+    }
+
+    private fun observeQualityMode() {
+        scope.launch {
+            qualityStore.qualityMode.collect { mode ->
+                withContext(Dispatchers.Main) {
+                    if (mutableState.value.qualityMode != mode) {
+                        mutableState.value = mutableState.value.copy(qualityMode = mode)
+                        lookaheadJob?.cancel()
+                        lookaheadJob = null
+                        lookaheadCache = null
+                        lookaheadTargetKey = null
+                    }
+                }
+            }
+        }
     }
 
     private fun observeVoicePackState() {
@@ -216,7 +245,7 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
         idleTimeoutJob?.cancel()
         idleTimeoutJob = scope.launch {
             delay(180_000L) // 3 minutes
-            if (!state.value.playing) {
+            if (!state.value.playing && lookaheadJob?.isActive != true) {
                 supertonicEngine?.close()
                 supertonicEngine = null
             }
@@ -228,8 +257,45 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
         idleTimeoutJob = null
     }
 
+    private fun buildCacheKey(voice: String, speed: Float, qualityMode: SupertonicQualityMode, text: String): String =
+        "$voice:$speed:${qualityMode.name}:$text"
+
+    private fun stopActivePlayback(clearLookahead: Boolean) {
+        generation++
+        completion = null
+        buffers = emptyList()
+        bufferIndex = 0
+
+        playbackJob?.cancel()
+        playbackJob = null
+
+        if (clearLookahead) {
+            lookaheadJob?.cancel()
+            lookaheadJob = null
+            lookaheadCache = null
+            lookaheadTargetKey = null
+        }
+
+        audioTrack?.let {
+            runCatching {
+                it.pause()
+                it.flush()
+                it.stop()
+                it.release()
+            }
+        }
+        audioTrack = null
+
+        engine?.stop()
+        if (clearLookahead) {
+            audio.abandonAudioFocusRequest(focus)
+            mutableState.value = state.value.copy(playing = false)
+            scheduleIdleTimeout()
+        }
+    }
+
     override fun speak(text: String, onDone: () -> Unit) {
-        pause()
+        stopActivePlayback(clearLookahead = false)
         if (!state.value.ready) return
         if (audio.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             mutableState.value = state.value.copy(status = "Audio is in use. Try play again.")
@@ -266,29 +332,40 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
 
         val voice = state.value.selectedVoice
         val speed = state.value.speed
-        val cacheKey = "$voice:$speed:$text"
+        val qualityMode = state.value.qualityMode
+        val cacheKey = buildCacheKey(voice, speed, qualityMode, text)
 
         playbackJob = scope.launch(Dispatchers.Default) {
             try {
-                val pcm: ShortArray
+                var cachedPcm: ShortArray? = null
+
                 if (lookaheadCache?.first == cacheKey) {
-                    pcm = lookaheadCache!!.second
+                    cachedPcm = lookaheadCache!!.second
                     lookaheadCache = null
+                    lookaheadTargetKey = null
+                } else if (lookaheadTargetKey == cacheKey && lookaheadJob?.isActive == true) {
+                    lookaheadJob?.join()
+                    if (lookaheadCache?.first == cacheKey) {
+                        cachedPcm = lookaheadCache!!.second
+                        lookaheadCache = null
+                        lookaheadTargetKey = null
+                    }
+                }
+
+                if (lookaheadTargetKey != cacheKey) {
+                    lookaheadJob?.cancel()
+                    lookaheadJob = null
+                    lookaheadCache = null
+                    lookaheadTargetKey = null
+                }
+
+                if (cachedPcm != null && cachedPcm.isNotEmpty()) {
+                    playPcmStream(flowOf(cachedPcm))
                 } else {
                     val eng = getOrCreateSupertonicEngine()
-                    pcm = eng.synthesize(text, voice, speed)
+                    val stream = eng.synthesizeStream(text, voice, speed, qualityMode)
+                    playPcmStream(stream)
                 }
-
-                if (pcm.isEmpty() || !isActive) {
-                    withContext(Dispatchers.Main) {
-                        mutableState.value = state.value.copy(playing = false)
-                        audio.abandonAudioFocusRequest(focus)
-                        scheduleIdleTimeout()
-                    }
-                    return@launch
-                }
-
-                playPcm(pcm)
 
                 withContext(Dispatchers.Main) {
                     mutableState.value = state.value.copy(playing = false)
@@ -298,6 +375,13 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
                     completion = null
                     cb?.invoke()
                 }
+            } catch (e: CancellationException) {
+                withContext(Dispatchers.Main) {
+                    mutableState.value = state.value.copy(playing = false)
+                    audio.abandonAudioFocusRequest(focus)
+                    scheduleIdleTimeout()
+                }
+                throw e
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     mutableState.value = state.value.copy(playing = false)
@@ -308,9 +392,9 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
         }
     }
 
-    private suspend fun playPcm(pcm: ShortArray) = withContext(Dispatchers.IO) {
+    private suspend fun playPcmStream(chunks: Flow<ShortArray>) = withContext(Dispatchers.IO) {
         val minBufferSize = AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val bufferSize = maxOf(minBufferSize, pcm.size * 2, 44100 * 2)
+        val bufferSize = maxOf(minBufferSize, 44100 * 2)
         val track = AudioTrack.Builder()
             .setAudioAttributes(attributes)
             .setAudioFormat(
@@ -325,6 +409,7 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
             .build()
         audioTrack = track
 
+        var totalWrittenSamples = 0L
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 track.playbackParams = PlaybackParams().apply {
@@ -332,14 +417,43 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
                     setPitch(1.0f)
                 }
             }
-            track.play()
-            track.write(pcm, 0, pcm.size)
+            var hasStartedPlaying = false
 
-            while (track.playState == AudioTrack.PLAYSTATE_PLAYING && track.playbackHeadPosition < pcm.size) {
-                delay(20)
+            chunks.buffer(Channel.UNLIMITED).collect { pcmChunk ->
+                currentCoroutineContext().ensureActive()
+                if (pcmChunk.isEmpty()) return@collect
+
+                if (!hasStartedPlaying) {
+                    track.play()
+                    hasStartedPlaying = true
+                }
+
+                val sliceSize = 4096
+                var offset = 0
+                while (offset < pcmChunk.size) {
+                    currentCoroutineContext().ensureActive()
+                    val count = minOf(sliceSize, pcmChunk.size - offset)
+                    val written = track.write(pcmChunk, offset, count, AudioTrack.WRITE_BLOCKING)
+                    if (written > 0) {
+                        totalWrittenSamples += written
+                        offset += written
+                    } else if (written < 0) {
+                        break
+                    }
+                }
+            }
+
+            if (hasStartedPlaying) {
+                while (currentCoroutineContext().isActive &&
+                    track.playState == AudioTrack.PLAYSTATE_PLAYING &&
+                    track.playbackHeadPosition < totalWrittenSamples) {
+                    delay(20)
+                }
             }
         } finally {
             runCatching {
+                track.pause()
+                track.flush()
                 track.stop()
                 track.release()
             }
@@ -353,13 +467,22 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
         if (!state.value.useHd || state.value.packState !is VoicePackState.Installed) return
         val voice = state.value.selectedVoice
         val speed = state.value.speed
-        val cacheKey = "$voice:$speed:$text"
+        val qualityMode = state.value.qualityMode
+        val cacheKey = buildCacheKey(voice, speed, qualityMode, text)
+
+        if (lookaheadTargetKey == cacheKey && (lookaheadJob?.isActive == true || lookaheadCache?.first == cacheKey)) {
+            return
+        }
 
         lookaheadJob?.cancel()
+        lookaheadJob = null
+        lookaheadCache = null
+        lookaheadTargetKey = cacheKey
+
         lookaheadJob = scope.launch(Dispatchers.Default) {
             try {
                 val eng = getOrCreateSupertonicEngine()
-                val pcm = eng.synthesize(text, voice, speed)
+                val pcm = eng.synthesize(text, voice, speed, qualityMode)
                 if (isActive && pcm.isNotEmpty()) {
                     lookaheadCache = cacheKey to pcm
                 }
@@ -368,32 +491,7 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
     }
 
     override fun pause() {
-        generation++
-        completion = null
-        buffers = emptyList()
-        bufferIndex = 0
-
-        playbackJob?.cancel()
-        playbackJob = null
-
-        lookaheadJob?.cancel()
-        lookaheadJob = null
-        lookaheadCache = null
-
-        audioTrack?.let {
-            runCatching {
-                it.pause()
-                it.flush()
-                it.stop()
-                it.release()
-            }
-        }
-        audioTrack = null
-
-        engine?.stop()
-        audio.abandonAudioFocusRequest(focus)
-        mutableState.value = state.value.copy(playing = false)
-        scheduleIdleTimeout()
+        stopActivePlayback(clearLookahead = true)
     }
 
     override fun changeSpeed(): Float {
@@ -407,15 +505,34 @@ class Narrator(private val context: Context) : Narration, AutoCloseable {
     }
 
     override fun setEnginePreference(useHd: Boolean) {
+        lookaheadJob?.cancel()
+        lookaheadJob = null
+        lookaheadCache = null
+        lookaheadTargetKey = null
         preferences.edit().putBoolean("use_hd", useHd).apply()
         mutableState.value = state.value.copy(useHd = useHd)
         updateReadinessAndStatus()
     }
 
     override fun setVoicePreference(voice: String) {
+        lookaheadJob?.cancel()
+        lookaheadJob = null
+        lookaheadCache = null
+        lookaheadTargetKey = null
         preferences.edit().putString("voice", voice).apply()
         mutableState.value = state.value.copy(selectedVoice = voice)
         updateReadinessAndStatus()
+    }
+
+    override fun setQualityMode(mode: SupertonicQualityMode) {
+        mutableState.value = state.value.copy(qualityMode = mode)
+        lookaheadJob?.cancel()
+        lookaheadJob = null
+        lookaheadCache = null
+        lookaheadTargetKey = null
+        scope.launch {
+            qualityStore.setQualityMode(mode)
+        }
     }
 
     override fun downloadVoicePack() {

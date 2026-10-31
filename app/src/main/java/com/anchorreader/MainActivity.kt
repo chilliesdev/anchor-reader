@@ -145,6 +145,31 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             model.refreshStorage()
         }
     }
+    LaunchedEffect(
+        foreground, dialog, state.screen, state.currentProgress, state.book,
+        voice.ready, voice.useHd, voice.playing, state.autoplayRequested
+    ) {
+        if (foreground && dialog == null && voice.ready && voice.useHd && !voice.playing && !state.autoplayRequested) {
+            when (state.screen) {
+                Screen.PLAYER -> {
+                    val progress = state.currentProgress
+                    val unit = state.book.units.getOrNull(progress.unitIndex)
+                    val sentence = unit?.sentences?.getOrNull(progress.sentenceIndex)
+                    if (!sentence.isNullOrBlank()) {
+                        narrator.prepareNext(sentence)
+                    }
+                }
+                Screen.OVERVIEW -> {
+                    val unit = state.book.units.firstOrNull()
+                    val sentence = unit?.sentences?.firstOrNull()
+                    if (!sentence.isNullOrBlank()) {
+                        narrator.prepareNext(sentence)
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
     LaunchedEffect(state.playbackRequest, state.autoplayRequested, voice.ready, voice.initializing, foreground, dialog) {
         if (state.autoplayRequested && !voice.initializing && !voice.ready) model.cancelPlaybackRequest()
         if (state.autoplayRequested && voice.ready && foreground && dialog == null && model.consumePlaybackRequest(state.playbackRequest)) speakCurrent()
@@ -233,6 +258,7 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
                         onDeleteVoicePack = { narrator.deleteVoicePack(); model.refreshStorage() },
                         onSetEnginePreference = { narrator.setEnginePreference(it) },
                         onSetVoicePreference = { narrator.setVoicePreference(it) },
+                        onSetQualityMode = { narrator.setQualityMode(it) },
                         onPreviewVoice = { narrator.previewVoice() },
                     )
                     Screen.PLAYER -> Unit
