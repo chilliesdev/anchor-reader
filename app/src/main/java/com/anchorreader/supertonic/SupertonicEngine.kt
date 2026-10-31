@@ -21,6 +21,18 @@ import java.nio.LongBuffer
 import java.util.EnumSet
 import java.util.Random
 
+data class ComponentBreakdown(
+    val preprocessMs: Double,
+    val durationPredictorMs: Double,
+    val textEncoderMs: Double,
+    val vectorEstimatorMs: Double,
+    val vocoderMs: Double,
+    val totalInferenceMs: Double,
+    val audioDurationSeconds: Float,
+    val rtf: Double,
+    val audioSamples: Int,
+)
+
 class SupertonicEngine(
     private val voiceDir: File,
     val intraOpThreads: Int = defaultIntraOpThreads(),
@@ -306,6 +318,147 @@ class SupertonicEngine(
         }
         finalLatentTensor.close()
         return pcm16
+    }
+
+    suspend fun benchmarkComponentBreakdown(
+        text: String,
+        voiceName: String = SupertonicManifest.DEFAULT_VOICE,
+        speed: Float = 1.0f,
+        qualityMode: SupertonicQualityMode = SupertonicQualityMode.STUDIO_5_STEP
+    ): ComponentBreakdown = inferenceMutex.withLock {
+        if (isClosed) throw IllegalStateException("Engine is closed")
+        val sid = SupertonicVoiceParser.sidForVoice(voiceName)
+        val slice = voiceParser.getVoiceSlice(sid)
+
+        val tPre0 = System.nanoTime()
+        val preprocessed = frontend.preprocess(text, "en")
+        val (tokens, mask) = frontend.encode(preprocessed)
+        val tPre1 = System.nanoTime()
+        val preprocessMs = (tPre1 - tPre0) / 1_000_000.0
+
+        val seqLen = tokens.size.toLong()
+        val dpSess = dpSession ?: throw IllegalStateException("dpSession is null")
+        val textEncSess = textEncSession ?: throw IllegalStateException("textEncSession is null")
+        val vectorEstSess = vectorEstSession ?: throw IllegalStateException("vectorEstSession is null")
+        val vocoderSess = vocoderSession ?: throw IllegalStateException("vocoderSession is null")
+
+        // 1. Duration Predictor
+        val tDp0 = System.nanoTime()
+        val dpTextIds = OnnxTensor.createTensor(env, LongBuffer.wrap(tokens), longArrayOf(1, seqLen))
+        val dpStyleDp = OnnxTensor.createTensor(env, FloatBuffer.wrap(slice.dpData), slice.dpShape)
+        val dpTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
+
+        val dpInputs = mapOf(
+            findInput(dpSess, "text", "id") to dpTextIds,
+            findInput(dpSess, "style", "dp") to dpStyleDp,
+            findInput(dpSess, "mask") to dpTextMask,
+        )
+        val durSeconds: Float
+        dpSess.run(dpInputs).use { out ->
+            val tensor = out.get(0) as OnnxTensor
+            val buf = tensor.floatBuffer
+            durSeconds = buf.get(0)
+        }
+        dpTextIds.close(); dpStyleDp.close(); dpTextMask.close()
+        val tDp1 = System.nanoTime()
+        val dpMs = (tDp1 - tDp0) / 1_000_000.0
+
+        val adjustedDur = (if (speed > 0f) durSeconds / speed else durSeconds).coerceAtLeast(0.1f)
+        val wavLen = (adjustedDur * sampleRate).toInt().coerceAtLeast(1)
+        val wavChunkSize = baseChunkSize * chunkCompressFactor
+        val latentLen = ((wavLen + wavChunkSize - 1) / wavChunkSize).coerceIn(1, 10000)
+        val latentDimTotal = latentDim * chunkCompressFactor
+        val latentTotalElements = latentDimTotal * latentLen
+
+        // 2. Text Encoder
+        val tTe0 = System.nanoTime()
+        val teTextIds = OnnxTensor.createTensor(env, LongBuffer.wrap(tokens), longArrayOf(1, seqLen))
+        val teStyleTtl = OnnxTensor.createTensor(env, FloatBuffer.wrap(slice.ttlData), slice.ttlShape)
+        val teTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
+
+        val teInputs = mapOf(
+            findInput(textEncSess, "text", "id") to teTextIds,
+            findInput(textEncSess, "style", "ttl") to teStyleTtl,
+            findInput(textEncSess, "mask") to teTextMask,
+        )
+        val textEmbTensor: OnnxTensor
+        val textEncResult = textEncSess.run(teInputs)
+        textEmbTensor = textEncResult.get(0) as OnnxTensor
+        teTextIds.close(); teStyleTtl.close(); teTextMask.close()
+        val tTe1 = System.nanoTime()
+        val teMs = (tTe1 - tTe0) / 1_000_000.0
+
+        // 3. Vector Estimator
+        val tVe0 = System.nanoTime()
+        val deterministicRandom = Random(42L)
+        val xtFlat = FloatArray(latentTotalElements) { (deterministicRandom.nextGaussian() * 0.5f).toFloat() }
+        val latentMaskArray = FloatArray(latentLen) { 1.0f }
+        val numSteps = qualityMode.steps
+        val totalStepTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(numSteps.toFloat())), longArrayOf(1))
+        val latentMaskTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(latentMaskArray), longArrayOf(1, 1, latentLen.toLong()))
+        val veStyleTtl = OnnxTensor.createTensor(env, FloatBuffer.wrap(slice.ttlData), slice.ttlShape)
+        val veTextMask = OnnxTensor.createTensor(env, FloatBuffer.wrap(mask), longArrayOf(1, 1, seqLen))
+
+        for (step in 0 until numSteps) {
+            val noisyLatentTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(xtFlat), longArrayOf(1, latentDimTotal.toLong(), latentLen.toLong()))
+            val currentStepTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(step.toFloat())), longArrayOf(1))
+
+            val veInputs = mapOf(
+                findInput(vectorEstSess, "noisy", "latent", "x") to noisyLatentTensor,
+                findInput(vectorEstSess, "current", "step") to currentStepTensor,
+                findInput(vectorEstSess, "text_emb", "emb") to textEmbTensor,
+                findInput(vectorEstSess, "style", "ttl") to veStyleTtl,
+                findInput(vectorEstSess, "latent_mask") to latentMaskTensor,
+                findInput(vectorEstSess, "text_mask") to veTextMask,
+                findInput(vectorEstSess, "total") to totalStepTensor,
+            )
+
+            vectorEstSess.run(veInputs).use { out ->
+                val denoised = out.get(0) as OnnxTensor
+                denoised.floatBuffer.get(xtFlat)
+            }
+            noisyLatentTensor.close()
+            currentStepTensor.close()
+        }
+        textEmbTensor.close()
+        textEncResult.close()
+        totalStepTensor.close()
+        latentMaskTensor.close()
+        veStyleTtl.close()
+        veTextMask.close()
+        val tVe1 = System.nanoTime()
+        val veMs = (tVe1 - tVe0) / 1_000_000.0
+
+        // 4. Vocoder
+        val tVoc0 = System.nanoTime()
+        val finalLatentTensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(xtFlat), longArrayOf(1, latentDimTotal.toLong(), latentLen.toLong()))
+        val vocInputs = mapOf(vocoderSess.inputNames.first() to finalLatentTensor)
+        var sampleCount = 0
+        vocoderSess.run(vocInputs).use { out ->
+            val wavTensor = out.get(0) as OnnxTensor
+            val wavBuf = wavTensor.floatBuffer
+            val totalSamples = wavBuf.remaining()
+            sampleCount = minOf(wavLen, totalSamples)
+        }
+        finalLatentTensor.close()
+        val tVoc1 = System.nanoTime()
+        val vocoderMs = (tVoc1 - tVoc0) / 1_000_000.0
+
+        val totalMs = preprocessMs + dpMs + teMs + veMs + vocoderMs
+        val audioDurationSeconds = sampleCount.toFloat() / sampleRate
+        val rtf = if (audioDurationSeconds > 0) (totalMs / 1000.0) / audioDurationSeconds else 0.0
+
+        ComponentBreakdown(
+            preprocessMs = preprocessMs,
+            durationPredictorMs = dpMs,
+            textEncoderMs = teMs,
+            vectorEstimatorMs = veMs,
+            vocoderMs = vocoderMs,
+            totalInferenceMs = totalMs,
+            audioDurationSeconds = audioDurationSeconds,
+            rtf = rtf,
+            audioSamples = sampleCount,
+        )
     }
 
     private fun findInput(session: OrtSession, vararg hints: String): String {
