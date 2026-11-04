@@ -178,6 +178,8 @@ class SupertonicBenchmarkDeviceTest {
             assertTrue("Vector Estimator 3-step latency must be positive", veAvg3 > 0)
             assertTrue("Vector Estimator 5-step latency must be positive", veAvg5 > 0)
             assertTrue("Vocoder latency must be positive", vocAvg3 > 0)
+            assertTrue("FAST_3_STEP RTF must be < 0.50, was $rtfAvg3", rtfAvg3 < 0.50)
+            assertTrue("STUDIO_5_STEP RTF must be < 0.50, was $rtfAvg5", rtfAvg5 < 0.50)
         } finally {
             engine.close()
         }
@@ -190,7 +192,8 @@ class SupertonicBenchmarkDeviceTest {
             val paragraph = "Anchor Reader provides private offline document reading. It streams high fidelity speech without external cloud dependencies."
 
             // Warmup
-            engine.synthesizeStream("Warm up stream.", qualityMode = SupertonicQualityMode.FAST_3_STEP).first()
+            engine.synthesizeStream(paragraph, qualityMode = SupertonicQualityMode.FAST_3_STEP).first()
+            engine.synthesizeStream(paragraph, qualityMode = SupertonicQualityMode.STUDIO_5_STEP).first()
 
             // 1. FAST_3_STEP streaming TTFA
             val runs = 3
@@ -198,6 +201,10 @@ class SupertonicBenchmarkDeviceTest {
             var streamSum3 = 0.0
 
             for (i in 0 until runs) {
+                if (i > 0) {
+                    System.gc()
+                    Thread.sleep(30)
+                }
                 val start = System.nanoTime()
                 var ttfa = 0.0
                 var firstChunk = true
@@ -226,6 +233,10 @@ class SupertonicBenchmarkDeviceTest {
             var streamSum5 = 0.0
 
             for (i in 0 until runs) {
+                if (i > 0) {
+                    System.gc()
+                    Thread.sleep(30)
+                }
                 val start = System.nanoTime()
                 var ttfa = 0.0
                 var firstChunk = true
@@ -251,6 +262,8 @@ class SupertonicBenchmarkDeviceTest {
 
             assertTrue("Clause 1 TTFA must be positive", avgTtfa3 > 0)
             assertTrue("Clause 1 TTFA must be less than total stream time", avgTtfa3 < avgTotal3)
+            assertTrue("Clause 1 TTFA FAST_3_STEP must be < 200ms, was $avgTtfa3", avgTtfa3 < 200.0)
+            assertTrue("Clause 1 TTFA STUDIO_5_STEP must be < 300ms, was $avgTtfa5", avgTtfa5 < 300.0)
         } finally {
             engine.close()
         }
@@ -287,8 +300,22 @@ class SupertonicBenchmarkDeviceTest {
             )
 
             assertTrue("Cache hit latency must be significantly faster than cache miss", hitMs < missMs)
+            assertTrue("Cache hit latency must be < 10 ms, was $hitMs", hitMs < 10.0)
         } finally {
             engine.close()
         }
+    }
+
+    @Test
+    fun test05_initialStreamingChunkContract() {
+        val paragraph = "Anchor Reader provides private offline document reading. It streams high fidelity speech without external cloud dependencies."
+        val clauses = SupertonicTextFrontend.splitStreamClauses(paragraph, initialStreamingChunk = true)
+        assertTrue("Must split into multiple clauses for streaming", clauses.size >= 2)
+        val initialChunk = clauses.first()
+        val words = initialChunk.split(Regex("\\s+")).size
+        val chars = initialChunk.length
+        Log.i(TAG, "INITIAL_STREAMING_CHUNK chunk='$initialChunk' words=$words chars=$chars")
+        assertTrue("Initial chunk word count must be 3..5, was $words ($initialChunk)", words in 3..5)
+        assertTrue("Initial chunk character length must be 15..30, was $chars ($initialChunk)", chars in 15..30)
     }
 }
