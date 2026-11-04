@@ -113,6 +113,30 @@ class SupertonicTextFrontendTest {
     }
 
     @Test
+    fun testInitialStreamingChunkSplitting() {
+        val text = "Anchor Reader provides private offline document reading. It streams high fidelity speech without external cloud dependencies."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(text, initialStreamingChunk = true)
+
+        assertTrue("Must have multiple chunks", chunks.size >= 2)
+        val first = chunks[0]
+        val wordCount = first.split(Regex("\\s+")).size
+        assertTrue("Initial chunk must be 3..5 words, was $wordCount ('$first')", wordCount in 3..5)
+        assertTrue("Initial chunk must be 15..30 chars, was ${first.length} ('$first')", first.length in 15..30)
+        assertEquals("Anchor Reader provides", first)
+    }
+
+    @Test
+    fun testInitialStreamingChunkWithPunctuation() {
+        val text = "Yes, dear friend, offline speech synthesis is running completely on device."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(text, initialStreamingChunk = true)
+        val first = chunks[0]
+        val wordCount = first.split(Regex("\\s+")).size
+        assertTrue("Initial chunk must be 3..5 words, was $wordCount", wordCount in 3..5)
+        assertTrue("Initial chunk must be 15..30 chars, was ${first.length}", first.length in 15..30)
+        assertEquals("Yes, dear friend,", first)
+    }
+
+    @Test
     fun testEncodingWithIndexer() {
         val text = "<en>abc</en>"
         val (tokens, mask) = frontend.encode(text)

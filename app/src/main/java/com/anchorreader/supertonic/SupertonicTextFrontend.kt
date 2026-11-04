@@ -6,7 +6,7 @@ import java.text.Normalizer
 
 class SupertonicTextFrontend(private val indexer: IntArray) {
 
-    fun preprocess(text: String, lang: String = "en"): String {
+    fun preprocess(text: String, lang: String = "en", isClause: Boolean = false): String {
         // 1. Unicode NFKD decomposition
         var s = Normalizer.normalize(text, Normalizer.Form.NFKD)
 
@@ -33,10 +33,10 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
 
         if (s.isEmpty()) return ""
 
-        // 6. Ensure ending punctuation
+        // 6. Ensure ending punctuation only for full sentences or when not a streaming intra-clause
         val last = s.last()
         val endsWithPunct = last in setOf('.', '!', '?', ';', ':', ',', '\'', '"', ')', ']', '}')
-        if (!endsWithPunct) {
+        if (!endsWithPunct && !isClause) {
             s += "."
         }
 
@@ -65,6 +65,82 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
                 indexer[i] = buffer.int
             }
             return indexer
+        }
+
+        fun splitInitialStreamingChunk(
+            text: String,
+            minWords: Int = 3,
+            maxWords: Int = 5,
+            minChars: Int = 15,
+            maxChars: Int = 30
+        ): Pair<String, String>? {
+            val trimmed = text.trim()
+            if (trimmed.length <= maxChars) return null
+
+            val words = trimmed.split(Regex("\\s+"))
+            if (words.size <= minWords) return null
+
+            // 1. Check for punctuation boundaries within 3..5 words and minChars..maxChars
+            val punctuationDelimiters = listOf("; ", ", ", ": ", " - ", " — ", ". ", "! ", "? ")
+            val searchCap = minOf(trimmed.length, maxChars + 2)
+            val window = trimmed.substring(0, searchCap)
+
+            var bestPunctSplit: Pair<Int, Int>? = null
+            for (delim in punctuationDelimiters) {
+                var idx = window.indexOf(delim)
+                while (idx != -1) {
+                    val candidate = trimmed.substring(0, idx + if (delim.startsWith(" ")) 0 else 1).trim()
+                    val candWords = candidate.split(Regex("\\s+")).size
+                    val nextStart = idx + delim.length
+                    if (candWords in minWords..maxWords && candidate.length in minChars..maxChars && nextStart < trimmed.length) {
+                        bestPunctSplit = candidate.length to nextStart
+                        break
+                    }
+                    idx = window.indexOf(delim, idx + 1)
+                }
+                if (bestPunctSplit != null) break
+            }
+
+            if (bestPunctSplit != null) {
+                val initial = trimmed.substring(0, bestPunctSplit.first).trim()
+                val remaining = trimmed.substring(bestPunctSplit.second).trim()
+                if (initial.isNotEmpty() && remaining.isNotEmpty()) {
+                    return initial to remaining
+                }
+            }
+
+            // 2. Fall back to natural word boundaries within minWords..maxWords and minChars..maxChars
+            var accumLength = 0
+            var splitIndex = -1
+            for (i in words.indices) {
+                val word = words[i]
+                val prevLen = accumLength
+                accumLength += word.length + (if (i > 0) 1 else 0)
+                val wordCount = i + 1
+
+                if (wordCount in minWords..maxWords && accumLength in minChars..maxChars) {
+                    splitIndex = accumLength
+                    // Prefer 3 words if already within 15..30 chars for lowest TTFA
+                    if (wordCount >= minWords) {
+                        break
+                    }
+                } else if (accumLength > maxChars) {
+                    if (splitIndex == -1 && wordCount > minWords) {
+                        splitIndex = prevLen
+                    }
+                    break
+                }
+            }
+
+            if (splitIndex in 1 until trimmed.length) {
+                val initial = trimmed.substring(0, splitIndex).trim()
+                val remaining = trimmed.substring(splitIndex).trim()
+                if (initial.isNotEmpty() && remaining.isNotEmpty()) {
+                    return initial to remaining
+                }
+            }
+
+            return null
         }
 
         fun splitClauses(text: String, maxLen: Int = MAX_CHUNK_LEN): List<String> {
@@ -107,10 +183,21 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
         fun splitStreamClauses(
             text: String,
             minClauseLen: Int = 24,
-            maxLen: Int = MAX_CHUNK_LEN
+            maxLen: Int = MAX_CHUNK_LEN,
+            initialStreamingChunk: Boolean = false
         ): List<String> {
             val trimmed = text.trim()
             if (trimmed.isEmpty()) return emptyList()
+
+            if (initialStreamingChunk) {
+                val initialSplit = splitInitialStreamingChunk(trimmed)
+                if (initialSplit != null) {
+                    val result = mutableListOf(initialSplit.first)
+                    result.addAll(splitStreamClauses(initialSplit.second, minClauseLen, maxLen, initialStreamingChunk = false))
+                    return result
+                }
+            }
+
             if (trimmed.length <= minClauseLen) return listOf(trimmed)
 
             val delimiters = listOf("; ", ": ", ". ", "! ", "? ", " — ", " – ", " - ", ", ")
