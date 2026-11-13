@@ -3,8 +3,16 @@ package com.anchorreader.supertonic
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.anchorreader.HdPrefetchPipeline
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import org.junit.AfterClass
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -21,6 +29,7 @@ class SupertonicBenchmarkDeviceTest {
     companion object {
         private const val TAG = "SupertonicBenchmark"
         private lateinit var voiceDir: File
+        private var stagedIntoFilesDir = false
 
         @BeforeClass
         @JvmStatic
@@ -40,6 +49,7 @@ class SupertonicBenchmarkDeviceTest {
                     }
                 }
                 File(targetDir, SupertonicManifest.VERIFIED_MARKER).writeText("verified\nbenchmark\n")
+                stagedIntoFilesDir = true
                 voiceDir = if (isVoiceDirectoryComplete(targetDir)) targetDir else fallbackDir
             } else {
                 throw IllegalStateException(
@@ -47,6 +57,15 @@ class SupertonicBenchmarkDeviceTest {
                 )
             }
             Log.i(TAG, "BENCHMARK_PREPARED voice_dir=${voiceDir.absolutePath}")
+        }
+
+        @AfterClass
+        @JvmStatic
+        fun cleanupStagedVoicePack() {
+            if (stagedIntoFilesDir) {
+                val context = InstrumentationRegistry.getInstrumentation().targetContext
+                File(context.filesDir, "supertonic_voice").deleteRecursively()
+            }
         }
 
         private fun isVoiceDirectoryComplete(dir: File): Boolean {
@@ -317,5 +336,68 @@ class SupertonicBenchmarkDeviceTest {
         Log.i(TAG, "INITIAL_STREAMING_CHUNK chunk='$initialChunk' words=$words chars=$chars")
         assertTrue("Initial chunk word count must be 3..5, was $words ($initialChunk)", words in 3..5)
         assertTrue("Initial chunk character length must be 15..30, was $chars ($initialChunk)", chars in 15..30)
+    }
+
+    @Test
+    fun test06_multiSentencePipelineTransitionLatency() = runBlocking {
+        val engine = SupertonicEngine(voiceDir)
+        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+        try {
+            engine.warmup()
+            val pipeline = HdPrefetchPipeline(
+                scope = scope,
+                dispatcher = Dispatchers.Default,
+                maxEntries = 4
+            ) { text, voice, speed, mode ->
+                engine.synthesizeStream(text, voice, speed, mode)
+            }
+
+            val sentences = listOf(
+                "Anchor Reader provides private offline document reading for students and researchers.",
+                "Every sentence transitions seamlessly without waiting for background synthesis.",
+                "Lookahead prefetching prepares upcoming audio while the current sentence plays."
+            )
+
+            // Simulate speakCurrent() on sentence 0 + immediate prepareNext([sentence 1, sentence 2])
+            val entry0 = pipeline.claimForPlayback(sentences[0], "F1", 1.0f, SupertonicQualityMode.STUDIO_5_STEP)
+            pipeline.enqueueLookahead(sentences.drop(1), "F1", 1.0f, SupertonicQualityMode.STUDIO_5_STEP)
+
+            val chunks0 = entry0.asFlow().toList()
+            val audioSamples0 = chunks0.sumOf { it.size }
+            val playbackMs0 = (audioSamples0.toDouble() / engine.sampleRate * 1000.0).toLong()
+            // Simulate real-time playback window of sentence 0 while lookahead runs in background
+            delay(minOf(playbackMs0, 1500L))
+
+            // Transition to sentence 1 + enqueue sentence 2
+            val t1Start = System.nanoTime()
+            val entry1 = pipeline.claimForPlayback(sentences[1], "F1", 1.0f, SupertonicQualityMode.STUDIO_5_STEP)
+            pipeline.enqueueLookahead(listOf(sentences[2]), "F1", 1.0f, SupertonicQualityMode.STUDIO_5_STEP)
+            val firstChunk1 = entry1.asFlow().first()
+            val transition1Ms = (System.nanoTime() - t1Start) / 1_000_000.0
+            assertTrue("Sentence 1 first chunk must not be empty", firstChunk1.isNotEmpty())
+
+            val chunks1 = entry1.asFlow().toList()
+            val audioSamples1 = chunks1.sumOf { it.size }
+            val playbackMs1 = (audioSamples1.toDouble() / engine.sampleRate * 1000.0).toLong()
+            delay(minOf(playbackMs1, 1500L))
+
+            // Transition to sentence 2
+            val t2Start = System.nanoTime()
+            val entry2 = pipeline.claimForPlayback(sentences[2], "F1", 1.0f, SupertonicQualityMode.STUDIO_5_STEP)
+            val firstChunk2 = entry2.asFlow().first()
+            val transition2Ms = (System.nanoTime() - t2Start) / 1_000_000.0
+            assertTrue("Sentence 2 first chunk must not be empty", firstChunk2.isNotEmpty())
+
+            Log.i(
+                TAG,
+                "MULTI_SENTENCE_TRANSITION s0_to_s1_ms=%.3f s1_to_s2_ms=%.3f"
+                    .format(transition1Ms, transition2Ms)
+            )
+            assertTrue("Sentence 0 -> 1 transition must be < 15 ms, was $transition1Ms", transition1Ms < 15.0)
+            assertTrue("Sentence 1 -> 2 transition must be < 15 ms, was $transition2Ms", transition2Ms < 15.0)
+        } finally {
+            scope.cancel()
+            engine.close()
+        }
     }
 }

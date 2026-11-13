@@ -56,6 +56,8 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
 
     companion object {
         const val MAX_CHUNK_LEN = 280
+        const val BRIDGE_CLAUSE_MAX_LEN = 75
+        const val STREAM_CLAUSE_MAX_LEN = 160
 
         fun loadIndexer(bytes: ByteArray): IntArray {
             require(bytes.size >= 65536 * 4) { "Invalid unicode_indexer.bin: expected at least ${65536 * 4} bytes, got ${bytes.size}" }
@@ -183,37 +185,44 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
         fun splitStreamClauses(
             text: String,
             minClauseLen: Int = 24,
-            maxLen: Int = MAX_CHUNK_LEN,
+            maxLen: Int = STREAM_CLAUSE_MAX_LEN,
             initialStreamingChunk: Boolean = false
         ): List<String> {
             val trimmed = text.trim()
             if (trimmed.isEmpty()) return emptyList()
 
+            val result = mutableListOf<String>()
+            var remaining = trimmed
+
             if (initialStreamingChunk) {
-                val initialSplit = splitInitialStreamingChunk(trimmed)
+                val initialSplit = splitInitialStreamingChunk(remaining)
                 if (initialSplit != null) {
-                    val result = mutableListOf(initialSplit.first)
-                    result.addAll(splitStreamClauses(initialSplit.second, minClauseLen, maxLen, initialStreamingChunk = false))
-                    return result
+                    result.add(initialSplit.first)
+                    remaining = initialSplit.second
                 }
             }
 
-            if (trimmed.length <= minClauseLen) return listOf(trimmed)
-
             val delimiters = listOf("; ", ": ", ". ", "! ", "? ", " — ", " – ", " - ", ", ")
-            val chunks = mutableListOf<String>()
-            var remaining = trimmed
 
             while (remaining.isNotEmpty()) {
-                val searchLimit = minOf(remaining.length, maxLen)
+                val isBridgeClause = initialStreamingChunk && result.size == 1
+                val currentMaxLen = if (isBridgeClause) minOf(maxLen, BRIDGE_CLAUSE_MAX_LEN) else maxLen
+                val currentMinLen = if (isBridgeClause) minOf(minClauseLen, 20) else minClauseLen
+
+                if (remaining.length <= currentMinLen) {
+                    result.add(remaining)
+                    break
+                }
+
+                val searchLimit = minOf(remaining.length, currentMaxLen)
                 var splitPoint: Pair<Int, Int>? = null
 
-                for (i in minClauseLen until searchLimit) {
+                for (i in currentMinLen until searchLimit) {
                     for (delim in delimiters) {
                         if (remaining.startsWith(delim, i)) {
                             val clauseEnd = if (delim.startsWith(" ")) i else i + 1
                             val nextStart = i + delim.length
-                            if (remaining.length - nextStart >= 16 || remaining.length > maxLen) {
+                            if (remaining.length - nextStart >= 16 || remaining.length > currentMaxLen) {
                                 splitPoint = clauseEnd to nextStart
                                 break
                             }
@@ -224,18 +233,18 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
 
                 if (splitPoint != null) {
                     val chunk = remaining.substring(0, splitPoint.first).trim()
-                    if (chunk.isNotEmpty()) chunks.add(chunk)
+                    if (chunk.isNotEmpty()) result.add(chunk)
                     remaining = remaining.substring(splitPoint.second).trim()
-                } else if (remaining.length <= maxLen) {
-                    chunks.add(remaining)
+                } else if (remaining.length <= currentMaxLen) {
+                    result.add(remaining)
                     break
                 } else {
-                    val window = remaining.substring(0, maxLen)
+                    val window = remaining.substring(0, currentMaxLen)
                     var fallbackEnd = -1
                     var fallbackNext = -1
                     for (delim in delimiters) {
                         val idx = window.lastIndexOf(delim)
-                        if (idx in 0 until maxLen) {
+                        if (idx in 0 until currentMaxLen) {
                             fallbackEnd = if (delim.startsWith(" ")) idx else idx + 1
                             fallbackNext = idx + delim.length
                             break
@@ -247,16 +256,16 @@ class SupertonicTextFrontend(private val indexer: IntArray) {
                             fallbackEnd = spaceIdx
                             fallbackNext = spaceIdx + 1
                         } else {
-                            fallbackEnd = maxLen
-                            fallbackNext = maxLen
+                            fallbackEnd = currentMaxLen
+                            fallbackNext = currentMaxLen
                         }
                     }
                     val chunk = remaining.substring(0, fallbackEnd).trim()
-                    if (chunk.isNotEmpty()) chunks.add(chunk)
+                    if (chunk.isNotEmpty()) result.add(chunk)
                     remaining = remaining.substring(fallbackNext).trim()
                 }
             }
-            return chunks
+            return result
         }
     }
 }
