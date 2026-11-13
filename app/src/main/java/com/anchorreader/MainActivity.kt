@@ -13,6 +13,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import com.anchorreader.data.Book
+import com.anchorreader.data.Progress
 import com.anchorreader.data.web.WebContentExtractor
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -76,6 +78,30 @@ private fun openVoiceSettings(context: Context) {
     catch (_: android.content.ActivityNotFoundException) { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
 }
 
+internal fun upcomingSentences(book: Book, progress: Progress, count: Int = 3): List<String> {
+    if (count <= 0 || book.units.isEmpty()) return emptyList()
+    val result = ArrayList<String>(count)
+    val startUnit = if (progress.completed) 0 else progress.unitIndex.coerceIn(book.units.indices)
+    val startSentence = if (progress.completed) 0 else progress.sentenceIndex.coerceIn(
+        book.units[startUnit].sentences.indices
+    )
+    var u = startUnit
+    var s = startSentence
+    while (u < book.units.size && result.size < count) {
+        val sentences = book.units[u].sentences
+        while (s < sentences.size && result.size < count) {
+            val text = sentences[s]
+            if (text.isNotBlank()) {
+                result.add(text)
+            }
+            s++
+        }
+        u++
+        s = 0
+    }
+    return result
+}
+
 @Composable
 fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
     val state by model.state.collectAsStateWithLifecycle()
@@ -135,9 +161,9 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
             if (foreground && dialog == null && latest.screen == Screen.PLAYER && latest.activeId == current.activeId &&
                 latest.playbackRequest == current.playbackRequest && latest.currentProgress.unitIndex == progress.unitIndex && latest.currentProgress.sentenceIndex == progress.sentenceIndex && model.nextSentence()) speakCurrent()
         }
-        val nextIndex = progress.sentenceIndex + 1
-        if (nextIndex < current.book.units[progress.unitIndex].sentences.size) {
-            narrator.prepareNext(current.book.units[progress.unitIndex].sentences[nextIndex])
+        val lookahead = upcomingSentences(current.book, progress, count = 3).drop(1)
+        if (lookahead.isNotEmpty()) {
+            narrator.prepareNext(lookahead)
         }
     }
     LaunchedEffect(voice.packState) {
@@ -151,19 +177,16 @@ fun ReaderApp(narrator: Narration, model: ReaderViewModel = viewModel()) {
     ) {
         if (foreground && dialog == null && voice.ready && voice.useHd && !voice.playing && !state.autoplayRequested) {
             when (state.screen) {
-                Screen.PLAYER -> {
-                    val progress = state.currentProgress
-                    val unit = state.book.units.getOrNull(progress.unitIndex)
-                    val sentence = unit?.sentences?.getOrNull(progress.sentenceIndex)
-                    if (!sentence.isNullOrBlank()) {
-                        narrator.prepareNext(sentence)
+                Screen.PLAYER, Screen.OVERVIEW -> {
+                    val lookahead = upcomingSentences(state.book, state.currentProgress, count = 2).toMutableList()
+                    if (state.screen == Screen.OVERVIEW) {
+                        val firstSentence = state.book.units.firstOrNull()?.sentences?.firstOrNull()
+                        if (!firstSentence.isNullOrBlank() && firstSentence !in lookahead) {
+                            lookahead.add(firstSentence)
+                        }
                     }
-                }
-                Screen.OVERVIEW -> {
-                    val unit = state.book.units.firstOrNull()
-                    val sentence = unit?.sentences?.firstOrNull()
-                    if (!sentence.isNullOrBlank()) {
-                        narrator.prepareNext(sentence)
+                    if (lookahead.isNotEmpty()) {
+                        narrator.prepareNext(lookahead)
                     }
                 }
                 else -> Unit

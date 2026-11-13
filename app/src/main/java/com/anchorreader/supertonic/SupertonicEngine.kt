@@ -107,6 +107,8 @@ class SupertonicEngine(
     private val inferenceMutex = Mutex()
     @Volatile
     private var isClosed = false
+    @Volatile
+    private var warmedUp = false
 
     init {
         val ttsJson = JSONObject(File(voiceDir, "tts.json").readText())
@@ -243,6 +245,16 @@ class SupertonicEngine(
         activeProvider = "CPU"
     }
 
+    suspend fun warmup() {
+        if (warmedUp || isClosed) return
+        inferenceMutex.withLock {
+            if (warmedUp || isClosed) return
+            val sid = SupertonicVoiceParser.sidForVoice(SupertonicManifest.DEFAULT_VOICE)
+            synthesizeChunkWithFallback("Hi.", sid, 1.0f, steps = 1, isClause = false)
+            warmedUp = true
+        }
+    }
+
     fun synthesizeStream(
         text: String,
         voiceName: String = SupertonicManifest.DEFAULT_VOICE,
@@ -258,18 +270,25 @@ class SupertonicEngine(
         for ((index, clause) in clauses.withIndex()) {
             currentCoroutineContext().ensureActive()
             val isFirst = initialStreamingChunk && index == 0
+            val isBridgeClause = initialStreamingChunk && index == 1 && clauses.size > 2
             val isIntraSentenceClause = index < clauses.size - 1 && !clause.endsWith(".") && !clause.endsWith("!") && !clause.endsWith("?")
-            val chunkSteps = if (isFirst) {
-                when (qualityMode) {
-                    SupertonicQualityMode.FAST_3_STEP -> 1
-                    SupertonicQualityMode.STUDIO_5_STEP -> 2
-                }
-            } else {
-                qualityMode.steps
+            val chunkSteps = when {
+                isFirst -> 1
+                isBridgeClause -> minOf(qualityMode.steps, 3)
+                else -> qualityMode.steps
             }
             val chunkAudio = inferenceMutex.withLock {
                 currentCoroutineContext().ensureActive()
-                synthesizeChunkWithFallback(clause, sid, speed, chunkSteps, isClause = isIntraSentenceClause)
+                val pcm = synthesizeChunkWithFallback(
+                    clause,
+                    sid,
+                    speed,
+                    chunkSteps,
+                    isClause = isIntraSentenceClause,
+                    isInitialMicroChunk = isFirst
+                )
+                warmedUp = true
+                pcm
             }
             if (chunkAudio.isNotEmpty()) {
                 emit(chunkAudio)
@@ -303,20 +322,21 @@ class SupertonicEngine(
         sid: Int,
         speed: Float,
         steps: Int,
-        isClause: Boolean = false
+        isClause: Boolean = false,
+        isInitialMicroChunk: Boolean = false
     ): ShortArray {
         if (isClosed) return ShortArray(0)
         return if (activeProvider == "NNAPI") {
             try {
-                synthesizeChunk(chunk, sid, speed, steps, isClause = isClause)
+                synthesizeChunk(chunk, sid, speed, steps, isClause = isClause, isInitialMicroChunk = isInitialMicroChunk)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 fallbackToCpu()
-                synthesizeChunk(chunk, sid, speed, steps, isClause = isClause)
+                synthesizeChunk(chunk, sid, speed, steps, isClause = isClause, isInitialMicroChunk = isInitialMicroChunk)
             }
         } else {
-            synthesizeChunk(chunk, sid, speed, steps, isClause = isClause)
+            synthesizeChunk(chunk, sid, speed, steps, isClause = isClause, isInitialMicroChunk = isInitialMicroChunk)
         }
     }
 
@@ -325,7 +345,8 @@ class SupertonicEngine(
         sid: Int,
         speed: Float,
         steps: Int,
-        isClause: Boolean = false
+        isClause: Boolean = false,
+        isInitialMicroChunk: Boolean = false
     ): ShortArray {
         if (isClosed) return ShortArray(0)
         currentCoroutineContext().ensureActive()
@@ -357,7 +378,13 @@ class SupertonicEngine(
             durSeconds = tensor.floatBuffer.get(0)
         }
 
-        val adjustedDur = (if (speed > 0f) durSeconds / speed else durSeconds).coerceAtLeast(0.1f)
+        val rawAdjustedDur = (if (speed > 0f) durSeconds / speed else durSeconds).coerceAtLeast(0.1f)
+        val adjustedDur = if (isInitialMicroChunk) {
+            val microCap = (chunk.length * 0.048f / speed.coerceAtLeast(0.5f)).coerceIn(0.55f, 1.25f)
+            minOf(rawAdjustedDur, microCap)
+        } else {
+            rawAdjustedDur
+        }
         val wavLen = (adjustedDur * sampleRate).toInt().coerceAtLeast(1)
         val wavChunkSize = baseChunkSize * chunkCompressFactor
         val latentLen = ((wavLen + wavChunkSize - 1) / wavChunkSize).coerceIn(1, 10000)

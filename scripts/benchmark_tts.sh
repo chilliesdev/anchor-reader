@@ -87,6 +87,7 @@ ttfa_fast = re.search(r"STREAMING_TTFA\s+mode=FAST_3_STEP\s+clause1_ttfa_ms=([\d
 ttfa_studio = re.search(r"STREAMING_TTFA\s+mode=STUDIO_5_STEP\s+clause1_ttfa_ms=([\d\.]+)\s+total_stream_ms=([\d\.]+)", log_content)
 lookahead_match = re.search(r"LOOKAHEAD_CACHE\s+hit_ms=([\d\.]+)\s+miss_ms=([\d\.]+)\s+speedup_ratio=([\d\.]+x?)", log_content)
 initial_chunk_match = re.search(r"INITIAL_STREAMING_CHUNK\s+chunk='([^']+)'\s+words=(\d+)\s+chars=(\d+)", log_content)
+transition_match = re.search(r"MULTI_SENTENCE_TRANSITION\s+s0_to_s1_ms=([\d\.]+)\s+s1_to_s2_ms=([\d\.]+)", log_content)
 
 print("=" * 80)
 print("             SUPERTONIC 3 HD TTS ON-DEVICE LATENCY BENCHMARK REPORT")
@@ -206,6 +207,19 @@ if initial_chunk_match:
 else:
     all_passed = False
     print(f"  {'Initial Streaming Chunk':<30} | {'3-5 w (15-30 c)':<18} | {'MISSING':<20} | {'FAIL':<6}")
+
+# Metric 6: Multi-Sentence Transition < 15 ms
+if transition_match:
+    t1_str, t2_str = transition_match.groups()
+    t1_val = float(t1_str)
+    t2_val = float(t2_str)
+    max_t = max(t1_val, t2_val)
+    status_trans = "PASS" if max_t < 15.0 else "FAIL"
+    if status_trans == "FAIL": all_passed = False
+    print(f"  {'Multi-Sentence Transition':<30} | {'< 15 ms':<18} | {f'{t1_val:.2f}/{t2_val:.2f} ms':<20} | {status_trans:<6}")
+else:
+    all_passed = False
+    print(f"  {'Multi-Sentence Transition':<30} | {'< 15 ms':<18} | {'MISSING':<20} | {'FAIL':<6}")
 
 print("=" * 80)
 if not all_passed:

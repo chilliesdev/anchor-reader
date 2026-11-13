@@ -137,6 +137,33 @@ class SupertonicTextFrontendTest {
     }
 
     @Test
+    fun testProgressiveClauseHorizonBoundsClause1AndClause2Plus() {
+        // Long sentence with no punctuation after initial words to test progressive horizon bounds
+        val text = "Anchor Reader provides seamless private document reading across complex academic papers and technical articles without ever sending your personal library data to external servers during speech synthesis."
+        val chunks = SupertonicTextFrontend.splitStreamClauses(text, initialStreamingChunk = true)
+
+        assertTrue("Must split into at least 3 progressive clauses", chunks.size >= 3)
+        // Clause 0: 3..5 words, 15..30 chars
+        val clause0Words = chunks[0].split(Regex("\\s+")).size
+        assertTrue("Clause 0 must be 3..5 words, was $clause0Words", clause0Words in 3..5)
+        assertTrue("Clause 0 must be 15..30 chars, was ${chunks[0].length}", chunks[0].length in 15..30)
+
+        // Clause 1 (bridge clause): <= 75 chars
+        assertTrue(
+            "Bridge clause (Clause 1) must be <= ${SupertonicTextFrontend.BRIDGE_CLAUSE_MAX_LEN} chars, was ${chunks[1].length} ('${chunks[1]}')",
+            chunks[1].length <= SupertonicTextFrontend.BRIDGE_CLAUSE_MAX_LEN
+        )
+
+        // Clause 2+: <= 160 chars
+        for (i in 2 until chunks.size) {
+            assertTrue(
+                "Clause $i must be <= ${SupertonicTextFrontend.STREAM_CLAUSE_MAX_LEN} chars, was ${chunks[i].length} ('${chunks[i]}')",
+                chunks[i].length <= SupertonicTextFrontend.STREAM_CLAUSE_MAX_LEN
+            )
+        }
+    }
+
+    @Test
     fun testEncodingWithIndexer() {
         val text = "<en>abc</en>"
         val (tokens, mask) = frontend.encode(text)
